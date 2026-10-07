@@ -1,0 +1,41 @@
+{
+    "bodies": [
+        {
+            "childs": [
+                {
+                    "bounds": {
+                        "x": 9,
+                        "y": 7,
+                        "z": 1
+                    },
+                    "color": "ffffff",
+                    "pos": {
+                        "x": -2,
+                        "y": -8,
+                        "z": 2
+                    },
+                    "shapeId": "027bd4ec-b16d-47d2-8756-e18dc2af3eb6",
+                    "xaxis": 1,
+                    "zaxis": 3
+                },
+                {
+                    "color": "ffffff",
+                    "controller": {
+                        "controllers": null,
+                        "id": 6890,
+                        "joints": null
+                    },
+                    "pos": {
+                        "x": 7,
+                        "y": -8,
+                        "z": 6
+                    },
+                    "shapeId": "ca003562-fde7-463c-969e-f8334ae54387",
+                    "xaxis": -1,
+                    "zaxis": 2
+                }
+            ]
+        }
+    ],
+    "version": 4
+}
