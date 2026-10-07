@@ -1,22 +1,60 @@
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_glfw.h"
 #include "imgui/imgui_impl_opengl3.h"
+#include "scrap_parser.hpp"
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
 
+std::vector<GLuint> iconTextures;
+json blueprint;
+json items;
+int iconWidth = 0;
+int iconHeight = 0;
+int programStatus = 1;
+int selectedBlueprintIndex = -1;
+// Loads an image file and returns an OpenGL Texture ID
+GLuint LoadTextureFromFile(const char* filename, int* out_width, int* out_height) {
+	int width, height, channels;
+	unsigned char* data = stbi_load(filename, &width, &height, &channels, 4); // Force RGBA
+	if (!data) return 0;
+
+	GLuint textureID;
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	stbi_image_free(data);
+
+	if (out_width) *out_width = width;
+	if (out_height) *out_height = height;
+
+	return textureID;
+}
+
 void render_imgui() {
-	ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-
-	ImGui::Begin("Dockable Window A");
-	ImGui::Text("Drag this tab around or dock it to edges!");
-	ImGui::End();
-
-	ImGui::Begin("Dockable Window B");
-	ImGui::Text("You can dock this next to or inside Window A.");
-	ImGui::End();
+	if (programStatus == 1) {
+		ImGui::Begin("Blueprint Loader");
+		ImGui::Text("Select a blueprint to load:");
+		int index = -1;
+		for (auto& iconTexture : iconTextures) {
+			index++;
+			ImGui::PushID(index); // Push a unique ID for each button to avoid ID conflicts
+			ImTextureID texID = (ImTextureID)(intptr_t)iconTexture;
+			if (ImGui::ImageButton("##bpIcon", texID, ImVec2(64, 64))) {
+				selectedBlueprintIndex = index;
+			}
+			ImGui::PopID(); // Pop the unique ID after the button
+		}
+		ImGui::End();
+	}
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
@@ -59,6 +97,17 @@ int main() {
 
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init("#version 330");
+
+
+	// load blueprint folders and their icons
+	std::vector<Parser::BlueprintPaths> blueprintFolders = Parser::getBlueprintFolders(); // Call the function to get blueprint folders
+
+	for (auto& bp : blueprintFolders) {
+		GLuint textureID = LoadTextureFromFile(bp.iconPath.string().c_str(), &iconWidth, &iconHeight);
+		iconTextures.push_back(textureID);
+	}
+
+
 
 	// Main loop
 	while (!glfwWindowShouldClose(window)) {
@@ -105,3 +154,58 @@ int main() {
 	glfwTerminate();
 	return 0;
 }
+
+/*
+int main() {
+	std::ifstream input("blueprint.json");
+	if (!input.is_open()) {
+		std::cerr << "Failed to open blueprint.json" << std::endl;
+		return 1;
+	}
+
+	json blueprint;
+	input >> blueprint;
+	input.close();
+
+	input.open("items.json");
+	if (!input.is_open()) {
+		std::cerr << "Failed to open items.json" << std::endl;
+		return 1;
+	}
+
+	json items;
+	input >> items;
+	input.close();
+
+	std::vector<Block> blockList;
+
+	// Iterate through bodies array, then childs array
+	int bodyIndex = -1;
+	int childIndex = -1;
+	if (blueprint.contains("bodies") && blueprint["bodies"].is_array()) {
+		for (const auto& body : blueprint["bodies"]) {
+			bodyIndex++;
+			if (body.contains("childs") && body["childs"].is_array()) {
+				for (const auto& blockJson : body["childs"]) {
+					childIndex++;
+					Block block = parseBlock(blockJson, bodyIndex, childIndex);
+					blockList.push_back(block);
+				}
+			}
+		}
+	}
+	// example: Recolor all blocks to white and move every "Toilet" up by 3 units in the z-axis
+	for (auto& block : blockList) {
+		block.color = "ffffff";
+		if (block.shapeID == findShapeIDByBlockName("Toilet", items)) {
+			block.pos.z += 3;
+		}
+	}
+	applyBlockListToNode(blockList, blueprint);
+	saveBlueprint("blueprint.json", blueprint);
+
+	return 0;
+}
+
+
+*/

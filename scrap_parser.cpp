@@ -1,30 +1,10 @@
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <nlohmann/json.hpp>
+#include "scrap_parser.hpp"
 
-using json = nlohmann::json;
 
-struct Position {
-	int x = 0, y = 0, z = 0;
-};
 
-struct Block {
-	Position bounds{ 1, 1, 1 }; // Default 1x1x1 for Scrap Mechanic blocks
-	std::string color = "ffffff";
-	Position pos{ 0, 0, 0 };
-	std::string shapeID = "";
-	int xaxis = 1;
-	int zaxis = 3;
 
-	// Indices to track the block's position in the blueprint structure
-	int bodyIndex = 0;
-	int childIndex = 0;
-};
-
-Block parseBlock(const json& blockJson, int bodyIndex, int childIndex) {
-	Block block;
+Parser::Block Parser::parseBlock(const json& blockJson, int bodyIndex, int childIndex) {
+	Parser::Block block;
 	block.bodyIndex = bodyIndex;
 	block.childIndex = childIndex;
 
@@ -52,7 +32,7 @@ Block parseBlock(const json& blockJson, int bodyIndex, int childIndex) {
 	return block;
 }
 
-void applyBlockListToNode(const std::vector<Block>& blockVector, json& blueprintJson) {
+void Parser::applyBlockListToNode(const std::vector<Parser::Block>& blockVector, json& blueprintJson) {
 
 	for (const auto& block : blockVector) { // pretty funky but it works.
 		blueprintJson["bodies"][block.bodyIndex]["childs"][block.childIndex]["pos"]["x"] = block.pos.x;
@@ -76,7 +56,7 @@ void applyBlockListToNode(const std::vector<Block>& blockVector, json& blueprint
 
 }
 
-bool saveBlueprint(const std::string& filepath, const json& blueprint) {
+bool Parser::saveBlueprint(const std::string& filepath, const json& blueprint) {
 	std::ofstream output(filepath);
 	if (!output.is_open()) {
 		std::cerr << "Failed to open " << filepath << " for writing!" << std::endl;
@@ -87,14 +67,14 @@ bool saveBlueprint(const std::string& filepath, const json& blueprint) {
 	output.close();
 	return true;
 }
-std::string findBlockNameByShapeID(const std::string& shapeID, const json& items) {
+std::string Parser::findBlockNameByShapeID(const std::string& shapeID, const json& items) {
 	if (items.contains(shapeID) && items[shapeID].contains("title")) {
 		return items[shapeID]["title"];
 	}
 	return "";
 }
 
-std::string findShapeIDByBlockName(const std::string& blockName, const json& items) {
+std::string Parser::findShapeIDByBlockName(const std::string& blockName, const json& items) {
 	for (const auto& [uuid, item_data] : items.items()) {
 		if (item_data.contains("title") && item_data["title"] == blockName) {
 			return uuid;
@@ -103,63 +83,4 @@ std::string findShapeIDByBlockName(const std::string& blockName, const json& ite
 	return "";
 }
 
-int getBlockCount(std::vector<Block>& blockList, const std::string& shapeID = "") {
-	int count = 0;
 
-	for (const auto& block : blockList) {
-		if (shapeID.empty() || block.shapeID == shapeID) // If shapeID is empty, count all blocks, else count only those matching the shapeID
-			count += block.bounds.x * block.bounds.y * block.bounds.z; // Count all blocks using their bounds
-	}
-	return count;
-}
-
-int main() {
-	std::ifstream input("blueprint.json");
-	if (!input.is_open()) {
-		std::cerr << "Failed to open blueprint.json" << std::endl;
-		return 1;
-	}
-
-	json blueprint;
-	input >> blueprint;
-	input.close();
-
-	input.open("items.json");
-	if (!input.is_open()) {
-		std::cerr << "Failed to open items.json" << std::endl;
-		return 1;
-	}
-
-	json items;
-	input >> items;
-	input.close();
-
-	std::vector<Block> blockList;
-
-	// Iterate through bodies array, then childs array
-	int bodyIndex = -1;
-	int childIndex = -1;
-	if (blueprint.contains("bodies") && blueprint["bodies"].is_array()) {
-		for (const auto& body : blueprint["bodies"]) {
-			bodyIndex++;
-			if (body.contains("childs") && body["childs"].is_array()) {
-				for (const auto& blockJson : body["childs"]) {
-					childIndex++;
-					Block block = parseBlock(blockJson, bodyIndex, childIndex);
-					blockList.push_back(block);
-				}
-			}
-		}
-	}
-	// example: Recolor all blocks to white and move every "Toilet" up by 3 units in the z-axis
-	for (auto& block : blockList) {
-		block.color = "ffffff";
-		if (block.shapeID == findShapeIDByBlockName("Toilet", items)) {
-			block.pos.z += 3;
-		}
-	}
-	applyBlockListToNode(blockList, blueprint);
-	saveBlueprint("blueprint.json", blueprint);
-
-	return 0;
-}
