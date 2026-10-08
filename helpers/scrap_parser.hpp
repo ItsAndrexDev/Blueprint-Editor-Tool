@@ -30,6 +30,7 @@ namespace Parser {
 		int childIndex = 0;
 	};
 
+	std::vector<Block> parseBlueprint(const json& blueprintJson);
 	Block parseBlock(const json& blockJson, int bodyIndex, int childIndex);
 
 	void applyBlockListToNode(const std::vector<Block>& blockVector, json& blueprintJson);

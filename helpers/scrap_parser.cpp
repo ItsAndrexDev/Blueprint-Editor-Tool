@@ -3,6 +3,22 @@
 
 
 
+std::vector<Parser::Block> Parser::parseBlueprint(const json& blueprintJson)
+{
+	std::vector<Parser::Block> blocks;
+	int bodyIndex = -1;
+	int childIndex = -1;
+	for (auto& body : blueprintJson["bodies"].items()) {
+		bodyIndex += 1;
+		for (auto& child : body.value()["childs"].items()) {
+			childIndex += 1;
+			Block block = parseBlock(child.value(), bodyIndex, childIndex);
+			blocks.push_back(block);
+		}
+	}
+	return blocks;
+}
+
 Parser::Block Parser::parseBlock(const json& blockJson, int bodyIndex, int childIndex) {
 	Parser::Block block;
 	block.bodyIndex = bodyIndex;
