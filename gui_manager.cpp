@@ -1,23 +1,32 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "gui_manager.hpp"
 #include "helpers/stb_image.h"
+#include <chrono>
+#include <thread>
 
 GuiManager::Gui::Gui(int width, int height, const char* title) {
 	if (!glfwInit()) return;
+	glfwStarted = true;
 
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_DEPTH_BITS, 24);
 
 	window = glfwCreateWindow(width, height, title, NULL, NULL);
 	if (!window) {
 		glfwTerminate();
+		glfwStarted = false;
 		return;
 	}
 	glfwMakeContextCurrent(window);
+	glfwSwapInterval(1);
 
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+		glfwDestroyWindow(window);
+		window = nullptr;
 		glfwTerminate();
+		glfwStarted = false;
 		return;
 	}
 
@@ -26,24 +35,47 @@ GuiManager::Gui::Gui(int width, int height, const char* title) {
 	// Initialize ImGui
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
+	imguiContextCreated = true;
 	io = &ImGui::GetIO(); (void)io;
 	io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // Allow docking
 	io->ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
 	ImGui::StyleColorsDark();
 
-	ImGui_ImplGlfw_InitForOpenGL(window, true);
-	ImGui_ImplOpenGL3_Init("#version 330");
+	if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
+		ImGui::DestroyContext();
+		imguiContextCreated = false;
+		glfwDestroyWindow(window);
+		window = nullptr;
+		glfwTerminate();
+		glfwStarted = false;
+		io = nullptr;
+		return;
+	}
+	glfwBackendInitialized = true;
+	if (!ImGui_ImplOpenGL3_Init("#version 330")) {
+		ImGui_ImplGlfw_Shutdown();
+		glfwBackendInitialized = false;
+		ImGui::DestroyContext();
+		imguiContextCreated = false;
+		glfwDestroyWindow(window);
+		window = nullptr;
+		glfwTerminate();
+		glfwStarted = false;
+		io = nullptr;
+		return;
+	}
+	openglBackendInitialized = true;
 	GuiTheme::ApplyUnityDark();
+	ready = true;
 }
 
 GuiManager::Gui::~Gui() {
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
-	ImGui::DestroyContext();
-
-	glfwDestroyWindow(window);
-	glfwTerminate();
+	if (openglBackendInitialized) ImGui_ImplOpenGL3_Shutdown();
+	if (glfwBackendInitialized) ImGui_ImplGlfw_Shutdown();
+	if (imguiContextCreated) ImGui::DestroyContext();
+	if (window) glfwDestroyWindow(window);
+	if (glfwStarted) glfwTerminate();
 }
 
 void GuiManager::Gui::SetupDockSpace() {
@@ -108,6 +140,16 @@ void GuiManager::endFrame(GLFWwindow* window, ImGuiIO* io)
 
 	// 8. Swap Buffers
 	glfwSwapBuffers(window);
+
+	// Some drivers ignore swap interval; keep an idle editor from spinning at
+	// an unlimited frame rate and consuming a full CPU core.
+	using FrameClock = std::chrono::steady_clock;
+	static auto previousFrameEnd = FrameClock::now();
+	constexpr auto frameBudget = std::chrono::microseconds(16667);
+	const auto now = FrameClock::now();
+	if (now - previousFrameEnd < frameBudget)
+		std::this_thread::sleep_for(frameBudget - (now - previousFrameEnd));
+	previousFrameEnd = FrameClock::now();
 }
 
 

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -19,6 +21,7 @@ namespace Parser {
 
 	struct Block {
 		Position bounds{ 1, 1, 1 }; // Default 1x1x1 for Scrap Mechanic blocks
+		bool hasBounds = false; // True only when the blueprint stores an explicit bounds field
 		std::string color = "ffffff";
 		Position pos{ 0, 0, 0 };
 		std::string shapeID = "";
@@ -34,6 +37,7 @@ namespace Parser {
 	Block parseBlock(const json& blockJson, int bodyIndex, int childIndex);
 
 	void applyBlockListToNode(const std::vector<Block>& blockVector, json& blueprintJson);
+	bool removeBlockFromNode(json& blueprintJson, int bodyIndex, int childIndex);
 
 	bool saveBlueprint(const std::string& filepath, const json& blueprint);
 	std::string findBlockNameByShapeID(const std::string& shapeID, const json& items);

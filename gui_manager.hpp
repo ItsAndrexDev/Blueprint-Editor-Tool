@@ -14,12 +14,18 @@ namespace GuiManager
 	public:
 		GLFWwindow* window = nullptr;
 		ImGuiIO* io = nullptr;
+		bool isReady() const { return ready; }
 		Gui(int width, int height, const char* title);
 		~Gui();
 
 		static void SetupDockSpace();
 
-
+	private:
+		bool glfwStarted = false;
+		bool imguiContextCreated = false;
+		bool glfwBackendInitialized = false;
+		bool openglBackendInitialized = false;
+		bool ready = false;
 	};
 	void newFrame();
 	void endFrame(GLFWwindow* window, ImGuiIO* io);
