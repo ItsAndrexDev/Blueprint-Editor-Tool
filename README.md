@@ -1,5 +1,5 @@
 # Scrap Mechanic Blueprint Editor
-
+Known Issues: incorrectly flagging upgradable items as survival only, seats,saddles being rendered as a box due to fallback mechanics.
 An independent desktop project for viewing and editing Scrap Mechanic blueprints outside the game. It turns a saved blueprint into a 3D scene so you can select parts, change their placement and appearance, and save the result without editing blueprint JSON by hand.
 
 The recent Scrap Mechanic update broke older external blueprint editors. This project is being developed as the currently working standalone editor for the updated game, with direct access to your saved blueprints and the game’s part models.
