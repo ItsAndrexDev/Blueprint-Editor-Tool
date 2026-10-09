@@ -23,6 +23,7 @@ namespace Parser {
 		Position bounds{ 1, 1, 1 }; // Default 1x1x1 for Scrap Mechanic blocks
 		bool hasBounds = false; // True only when the blueprint stores an explicit bounds field
 		std::string color = "ffffff";
+		bool hasColor = false; // Distinguishes an explicit white tint from the game's shape default
 		Position pos{ 0, 0, 0 };
 		std::string shapeID = "";
 		int xaxis = 1;

@@ -48,7 +48,7 @@ struct State {
     std::vector<int> dragSelection;
     float yaw=0.72f, pitch=0.42f, zoom=1.f;
     ImVec2 pan{0,0};
-    int dragBlock=-1,dragAxis=0;
+    int dragAxis=0;
     ImVec2 lastDragMouse{};
     ImVec2 dragScreenAxis{};
     float dragWorldPerPixel{};
@@ -709,6 +709,14 @@ bool colorValue(std::string s,int& out) {
     if(!s.empty()&&s[0]=='#')s.erase(0,1);if(s.size()!=6)return false;
     try{size_t n;unsigned long x=std::stoul(s,&n,16);if(n!=6)return false;out=(int)x;return true;}catch(...){return false;}
 }
+int displayColor(const Parser::Block& block) {
+    int color=0x8c9bad;
+    if(block.hasColor&&colorValue(block.color,color))return color;
+    const auto defaultColor=state.blockColors.find(lower(block.shapeID));
+    if(defaultColor!=state.blockColors.end()&&colorValue(defaultColor->second,color))return color;
+    if(colorValue(block.color,color))return color;
+    return 0x8c9bad;
+}
 void nudge(Parser::Block& b,int x,int y,int z){b.pos.x+=x;b.pos.y+=y;b.pos.z+=z;}
 }
 
@@ -745,10 +753,54 @@ void shutdownRenderer() {
     state.sceneTargetWidth=state.sceneTargetHeight=0;
 }
 
+void resetSelection() {
+    state.selection = -1;
+    state.selectionSet.clear();
+    state.dragSelection.clear();
+    state.dragAxis = 0;
+}
+
 void render(json& blueprint,const std::filesystem::path& blueprintPath,
-            std::vector<Parser::Block>& blocks,const json& items) {
+            std::vector<Parser::Block>& blocks,const json& items,
+            const std::string& blueprintName,bool& backToSelectionRequested) {
     loadCatalog();
-    if(state.currentBlueprint!=blueprintPath){state.meshes.clear();state.meshCacheBytes=0;state.currentBlueprint=blueprintPath;state.selection=-1;state.dragBlock=-1;state.dragAxis=0;state.pan={0,0};state.zoom=1.f;}
+    if(state.currentBlueprint!=blueprintPath){state.meshes.clear();state.meshCacheBytes=0;state.currentBlueprint=blueprintPath;state.selection=-1;state.selectionSet.clear();state.dragSelection.clear();state.dragAxis=0;state.pan={0,0};state.zoom=1.f;}
+    for(auto it=state.selectionSet.begin();it!=state.selectionSet.end();)if(*it<0||*it>=(int)blocks.size())it=state.selectionSet.erase(it);else ++it;
+    if(state.selection<0||state.selection>=(int)blocks.size())state.selection=-1;
+    if(state.selection>=0)state.selectionSet.insert(state.selection);
+    auto isSelected=[&](int index){return index==state.selection||state.selectionSet.contains(index);};
+    auto moveSelection=[&](int x,int y,int z){
+        if(state.selectionSet.empty()&&state.selection>=0)state.selectionSet.insert(state.selection);
+        for(int index:state.selectionSet)if(index>=0&&index<(int)blocks.size())nudge(blocks[index],x,y,z);
+    };
+    auto selectedWorldSize=[&](){
+        const float infinity=std::numeric_limits<float>::infinity();
+        V3 minimum{infinity,infinity,infinity},maximum{-infinity,-infinity,-infinity};
+        bool found=false;
+        for(size_t index=0;index<blocks.size();index++)if(isSelected((int)index)){
+            const auto& part=blocks[index];
+            const V3 center=blockCenter(part),half=shapeSize(part)*.5f;
+            for(int mask=0;mask<8;mask++){
+                const V3 corner=center+orient({mask&1?half.x:-half.x,mask&2?half.y:-half.y,mask&4?half.z:-half.z},part);
+                minimum.x=std::min(minimum.x,corner.x);minimum.y=std::min(minimum.y,corner.y);minimum.z=std::min(minimum.z,corner.z);
+                maximum.x=std::max(maximum.x,corner.x);maximum.y=std::max(maximum.y,corner.y);maximum.z=std::max(maximum.z,corner.z);
+            }
+            found=true;
+        }
+        return found?maximum-minimum:V3{};
+    };
+    auto setSelectionColor=[&](const std::string& color){
+        bool applied=false;
+        for(int index:state.selectionSet)if(index>=0&&index<(int)blocks.size()){
+            blocks[index].color=color;
+            blocks[index].hasColor=true;
+            applied=true;
+        }
+        if(!applied&&state.selection>=0&&state.selection<(int)blocks.size()){
+            blocks[state.selection].color=color;
+            blocks[state.selection].hasColor=true;
+        }
+    };
     size_t survivalOnlyParts=0;
     int firstSurvivalOnlyIndex=-1;
     for(size_t i=0;i<blocks.size();i++)if(state.survivalOnlyShapes.contains(lower(blocks[i].shapeID))){
@@ -765,12 +817,31 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
         }
     }
     ImGui::Begin("Blueprint Editor");
+    auto saveBlueprint=[&](){Parser::applyBlockListToNode(blocks,blueprint);if(Parser::saveBlueprint(blueprintPath.string(),blueprint))state.error.clear();else state.error="Could not save blueprint. Check file permissions.";};
+    auto removeSelection=[&](){
+        std::vector<std::pair<int,int>> children;
+        for(size_t i=0;i<blocks.size();++i)if(isSelected((int)i))children.emplace_back(blocks[i].bodyIndex,blocks[i].childIndex);
+        if(children.empty())return false;
+        Parser::applyBlockListToNode(blocks,blueprint);
+        std::sort(children.begin(),children.end(),[](const auto& a,const auto& b){return a.first!=b.first?a.first>b.first:a.second>b.second;});
+        bool removed=false;
+        for(const auto& child:children)removed=Parser::removeBlockFromNode(blueprint,child.first,child.second)||removed;
+        if(removed){blocks=Parser::parseBlueprint(blueprint);state.selection=-1;state.selectionSet.clear();state.dragSelection.clear();state.dragAxis=0;state.error="Selected parts removed. Save Blueprint to write the change to disk.";}
+        return removed;
+    };
+    const ImGuiIO& io=ImGui::GetIO();
+    const bool shortcutReady=ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&!io.WantTextInput&&!ImGui::IsAnyItemActive()&&!ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
+    if(shortcutReady&&io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false))saveBlueprint();
+    if(shortcutReady&&ImGui::IsKeyPressed(ImGuiKey_Delete,false))removeSelection();
+    ImGui::TextWrapped("Editing: %s",blueprintName.c_str());
+    if(ImGui::Button("Back to Selection"))backToSelectionRequested=true;
+    ImGui::Spacing();
     ImGui::Text("3D blueprint editor");ImGui::SameLine();ImGui::TextDisabled("%zu parts  |  %zu grid cells",blocks.size(),gridCellCount(blocks));
-    ImGui::SameLine();if(ImGui::Button("Save Blueprint")){Parser::applyBlockListToNode(blocks,blueprint);if(Parser::saveBlueprint(blueprintPath.string(),blueprint))state.error.clear();else state.error="Could not save blueprint. Check file permissions.";}
+    ImGui::SameLine();if(ImGui::Button("Save Blueprint"))saveBlueprint();
     ImGui::SameLine();if(ImGui::Button("Reset view")){state.yaw=.72f;state.pitch=.42f;state.zoom=1.f;state.pan={0,0};}
     if(survivalOnlyParts){
         ImGui::TextColored(ImVec4(1.f,.56f,.28f,1.f),"Creative import blocked: %zu Survival-only part(s).",survivalOnlyParts);
-        ImGui::SameLine();if(ImGui::SmallButton("Select incompatible part"))state.selection=firstSurvivalOnlyIndex;
+        ImGui::SameLine();if(ImGui::SmallButton("Select incompatible part")){state.selection=firstSurvivalOnlyIndex;state.selectionSet.clear();state.selectionSet.insert(firstSurvivalOnlyIndex);}
         ImGui::TextWrapped("Creative cannot load %s because its shape is Survival-only. Select the part, remove it in the inspector, then save; or use a Survival world.",firstSurvivalOnlyName.c_str());
     }
 
@@ -797,7 +868,7 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
     for(int k=0;k<=span;k+=stride){float d;auto a=screen({(float)(gx0+k),(float)gy0,minZ},d),b=screen({(float)(gx0+k),(float)(gy0+span),minZ},d);dl->AddLine(a,b,IM_COL32(66,72,82,90));a=screen({(float)gx0,(float)(gy0+k),minZ},d);b=screen({(float)(gx0+span),(float)(gy0+k),minZ},d);dl->AddLine(a,b,IM_COL32(66,72,82,90));}
 
     struct WorldTri{std::array<ImVec2,3> p;std::array<float,3> vertexDepth;std::array<ImU32,3> color;int block;};std::vector<WorldTri> triangles;
-    std::array<ImVec2,8> selectedOutline{};bool hasSelectedOutline=false;V3 selectedCenter{};
+    std::vector<std::pair<int,std::array<ImVec2,8>>> selectedOutlines;bool hasSelectedOutline=false;V3 selectedCenter{};
     size_t total=0;for(const auto& b:blocks){auto m=meshFor(b.shapeID);total+=m->loaded?m->indices.size()/3:12;}
     // Keep per-frame projection and streamed GPU memory bounded. Large scenes
     // are represented by a deterministic sample of their part boxes below.
@@ -807,24 +878,24 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
     const size_t previewStride=coarsePreview?std::max<size_t>(1,(blocks.size()+maximumPreviewBlocks-1)/maximumPreviewBlocks):1;
     triangles.reserve(coarsePreview?std::min<size_t>((blocks.size()/previewStride+1)*12,(maximumPreviewBlocks+1)*12):total);
     for(size_t bi=0;bi<blocks.size();bi++) {
-        if(coarsePreview&&bi%previewStride!=0&&(int)bi!=state.selection)continue;
+        if(coarsePreview&&bi%previewStride!=0&&!isSelected((int)bi))continue;
         const auto& b=blocks[bi];auto m=meshFor(b.shapeID);bool imported=!coarsePreview&&m&&m->loaded&&!m->indices.empty();
-        int col=0x8c9bad;colorValue(b.color,col);
-        if(col==0xffffff){auto defaultColor=state.blockColors.find(lower(b.shapeID));if(defaultColor!=state.blockColors.end())colorValue(defaultColor->second,col);}
+        const int col=displayColor(b);
         float red=(float)((col>>16)&255)/255.f,green=(float)((col>>8)&255)/255.f,blue=(float)(col&255)/255.f;
         const V3 dimensions=shapeSize(b);
         float sc[3]={dimensions.x,dimensions.y,dimensions.z};
         V3 lo{},hi{};if(imported&&m->hasBounds){lo=m->boundsMin;hi=m->boundsMax;sc[0]/=std::max(.001f,hi.x-lo.x);sc[1]/=std::max(.001f,hi.y-lo.y);sc[2]/=std::max(.001f,hi.z-lo.z);}else imported=false;
         const V3 center=blockCenter(b);
         auto world=[&](V3 v){if(imported){v={(v.x-(lo.x+hi.x)*.5f)*sc[0],(v.y-(lo.y+hi.y)*.5f)*sc[1],(v.z-(lo.z+hi.z)*.5f)*sc[2]};}else{v.x*=sc[0];v.y*=sc[1];v.z*=sc[2];}return orient(v,b)+center;};
-        if((int)bi==state.selection){
+        if(isSelected((int)bi)){
             const V3 localMin=imported?lo:V3{-.5f,-.5f,-.5f},localMax=imported?hi:V3{.5f,.5f,.5f};
             const V3 corners[8]={{localMin.x,localMin.y,localMin.z},{localMax.x,localMin.y,localMin.z},{localMax.x,localMax.y,localMin.z},{localMin.x,localMax.y,localMin.z},{localMin.x,localMin.y,localMax.z},{localMax.x,localMin.y,localMax.z},{localMax.x,localMax.y,localMax.z},{localMin.x,localMax.y,localMax.z}};
-            for(int i=0;i<8;i++){float d;selectedOutline[i]=screen(world(corners[i]),d);}
-            selectedCenter=center;
-            hasSelectedOutline=true;
+            std::array<ImVec2,8> outline{};
+            for(int i=0;i<8;i++){float d;outline[i]=screen(world(corners[i]),d);}
+            selectedOutlines.emplace_back((int)bi,outline);
+            if((int)bi==state.selection){selectedCenter=center;hasSelectedOutline=true;}
         }
-        auto append=[&](V3 aa,V3 bb,V3 cc,V3 na,V3 nb,V3 nc){V3 a=world(aa),q=world(bb),r=world(cc);const V3 transformed[3]={norm(orient({na.x/sc[0],na.y/sc[1],na.z/sc[2]},b)),norm(orient({nb.x/sc[0],nb.y/sc[1],nb.z/sc[2]},b)),norm(orient({nc.x/sc[0],nc.y/sc[1],nc.z/sc[2]},b))};const V3 lightDir=norm(V3{-.4f,.5f,.82f});ImU32 colors[3];for(int i=0;i<3;i++){float light=.88f+.12f*std::max(0.f,dot(transformed[i],lightDir));float shade=bi==(size_t)state.selection?std::min(1.f,light*1.04f):light;colors[i]=IM_COL32((int)(red*shade*255),(int)(green*shade*255),(int)(blue*shade*255),255);}float da,db,dc;auto pa=screen(a,da),pb=screen(q,db),pc=screen(r,dc);triangles.push_back({{pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},(int)bi});};
+        auto append=[&](V3 aa,V3 bb,V3 cc,V3 na,V3 nb,V3 nc){V3 a=world(aa),q=world(bb),r=world(cc);const V3 transformed[3]={norm(orient({na.x/sc[0],na.y/sc[1],na.z/sc[2]},b)),norm(orient({nb.x/sc[0],nb.y/sc[1],nb.z/sc[2]},b)),norm(orient({nc.x/sc[0],nc.y/sc[1],nc.z/sc[2]},b))};const V3 lightDir=norm(V3{-.4f,.5f,.82f});ImU32 colors[3];for(int i=0;i<3;i++){float light=.88f+.12f*std::max(0.f,dot(transformed[i],lightDir));float shade=isSelected((int)bi)?std::min(1.f,light*1.04f):light;colors[i]=IM_COL32((int)(red*shade*255),(int)(green*shade*255),(int)(blue*shade*255),255);}float da,db,dc;auto pa=screen(a,da),pb=screen(q,db),pc=screen(r,dc);triangles.push_back({{pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},(int)bi});};
         if(imported){const size_t sourceTriangles=m->indices.size()/3;for(size_t tri=0;tri<sourceTriangles;tri++){size_t ti=tri*3;const auto ia=m->indices[ti],ib=m->indices[ti+1],ic=m->indices[ti+2];if(ia>=m->vertices.size()||ib>=m->vertices.size()||ic>=m->vertices.size())continue;append(m->vertices[ia],m->vertices[ib],m->vertices[ic],m->normals[ia],m->normals[ib],m->normals[ic]);}}
         else {
             V3 v[8]={{-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f}};
@@ -891,7 +962,11 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
     if(hoveredAxis&&!state.dragAxis)ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     if(hasSelectedOutline){
         static constexpr int edges[][2]={{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
-        for(const auto& edge:edges)dl->AddLine(selectedOutline[edge[0]],selectedOutline[edge[1]],IM_COL32(102,210,255,255),2.f);
+        for(const auto& selectionOutline:selectedOutlines){
+            const bool active=selectionOutline.first==state.selection;
+            const ImU32 outlineColor=active?IM_COL32(102,210,255,255):IM_COL32(255,205,96,255);
+            for(const auto& edge:edges)dl->AddLine(selectionOutline.second[edge[0]],selectionOutline.second[edge[1]],outlineColor,active?2.f:1.7f);
+        }
 
         const ImU32 colors[3]={IM_COL32(255,112,112,255),IM_COL32(120,235,155,255),IM_COL32(115,175,255,255)};
         const char* positive[3]={"+X","+Y","+Z"};const char* negative[3]={"-X","-Y","-Z"};
@@ -933,45 +1008,79 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
                 if(depth>closestDepth){closestDepth=depth;picked=t.block;}
             }
         }
-        state.selection=picked;state.dragBlock=hitAxis?picked:-1;state.dragAxis=hitAxis;state.lastDragMouse=mouse;state.dragRemainder=0.f;state.dragWorldPerPixel=0.f;state.dragScreenAxis={0,0};
+        if(!hitAxis){
+            if(ImGui::GetIO().KeyShift){if(picked>=0){state.selection=picked;state.selectionSet.insert(picked);}}
+            else{state.selection=picked;state.selectionSet.clear();if(picked>=0)state.selectionSet.insert(picked);}
+        }
+        state.dragSelection.clear();
+        if(hitAxis){
+            state.dragSelection.assign(state.selectionSet.begin(),state.selectionSet.end());
+            if(state.dragSelection.empty()&&state.selection>=0)state.dragSelection.push_back(state.selection);
+        }
+        state.dragAxis=hitAxis;state.lastDragMouse=mouse;state.dragRemainder=0.f;state.dragWorldPerPixel=0.f;state.dragScreenAxis={0,0};
         if(hitAxis){const AxisHandle handle=getAxisHandle(hitAxis);state.dragScreenAxis=handle.screenAxis;state.dragWorldPerPixel=handle.worldPerPixel;}
     }
-    if(!ImGui::IsMouseDown(ImGuiMouseButton_Left)){state.dragBlock=-1;state.dragAxis=0;}
-    if(state.dragBlock>=0&&state.dragBlock<(int)blocks.size()&&state.dragAxis&&ImGui::IsMouseDown(ImGuiMouseButton_Left)){
+    if(!ImGui::IsMouseDown(ImGuiMouseButton_Left)){state.dragSelection.clear();state.dragAxis=0;}
+    if(!state.dragSelection.empty()&&state.dragAxis&&ImGui::IsMouseDown(ImGuiMouseButton_Left)){
         const ImVec2 delta=ImVec2(mouse.x-state.lastDragMouse.x,mouse.y-state.lastDragMouse.y);
         state.lastDragMouse=mouse;
         const int signedAxis=state.dragAxis;
-        if(state.dragWorldPerPixel>0.f){state.dragRemainder+=(delta.x*state.dragScreenAxis.x+delta.y*state.dragScreenAxis.y)*state.dragWorldPerPixel;const int steps=(int)std::trunc(state.dragRemainder);if(steps){nudge(blocks[state.dragBlock],signedAxis==1?steps:signedAxis==-1?-steps:0,signedAxis==2?steps:signedAxis==-2?-steps:0,signedAxis==3?steps:signedAxis==-3?-steps:0);state.dragRemainder-=steps;}}
+        if(state.dragWorldPerPixel>0.f){state.dragRemainder+=(delta.x*state.dragScreenAxis.x+delta.y*state.dragScreenAxis.y)*state.dragWorldPerPixel;const int steps=(int)std::trunc(state.dragRemainder);if(steps){for(int index:state.dragSelection)if(index>=0&&index<(int)blocks.size())nudge(blocks[index],signedAxis==1?steps:signedAxis==-1?-steps:0,signedAxis==2?steps:signedAxis==-2?-steps:0,signedAxis==3?steps:signedAxis==-3?-steps:0);state.dragRemainder-=steps;}}
     }
     ImGui::EndChild();ImGui::SameLine();ImGui::BeginChild("BlockInspector",ImVec2(inspector,0),true);
     ImGui::Text("INSPECTOR");ImGui::Separator();
     if(state.selection<0||state.selection>=(int)blocks.size())ImGui::TextDisabled("Click a block in the viewport to edit it.");
     else {
-        auto& b=blocks[state.selection];std::string title=Parser::findBlockNameByShapeID(b.shapeID,items);if(title.empty())title="Unknown part";ImGui::TextWrapped("%s",title.c_str());ImGui::TextDisabled("Part %d of %d  ·  body %d",state.selection+1,(int)blocks.size(),b.bodyIndex+1);ImGui::Spacing();
-        ImGui::Text("Position");ImGui::SetNextItemWidth(62);ImGui::InputInt("X##pos",&b.pos.x,0,0);ImGui::SameLine();ImGui::SetNextItemWidth(62);ImGui::InputInt("Y##pos",&b.pos.y,0,0);ImGui::SameLine();ImGui::SetNextItemWidth(62);ImGui::InputInt("Z##pos",&b.pos.z,0,0);
-        if(ImGui::Button("Left -X"))nudge(b,-1,0,0);ImGui::SameLine();if(ImGui::Button("Right +X"))nudge(b,1,0,0);
-        if(ImGui::Button("Forward +Y"))nudge(b,0,1,0);ImGui::SameLine();if(ImGui::Button("Back -Y"))nudge(b,0,-1,0);
-        if(ImGui::Button("Up +Z"))nudge(b,0,0,1);ImGui::SameLine();if(ImGui::Button("Down -Z"))nudge(b,0,0,-1);
-        ImGui::Spacing();ImGui::Text("Orientation");
+        auto& b=blocks[state.selection];
+        const bool multiSelection=state.selectionSet.size()>1;
+        std::string title=multiSelection?"Multi-selection":Parser::findBlockNameByShapeID(b.shapeID,items);
+        if(title.empty())title="Unknown part";
+        ImGui::TextWrapped("%s",title.c_str());
+        if(multiSelection)ImGui::TextDisabled("%zu parts selected · movement and color apply to all",state.selectionSet.size());
+        else ImGui::TextDisabled("Part %d of %d  ·  body %d",state.selection+1,(int)blocks.size(),b.bodyIndex+1);
+        ImGui::Spacing();
+        ImGui::Text("Position");
+        int positionX=b.pos.x,positionY=b.pos.y,positionZ=b.pos.z;
+        auto positionDelta=[](int target,int current){
+            const long long delta=(long long)target-(long long)current;
+            return (int)std::clamp(delta,(long long)std::numeric_limits<int>::min(),(long long)std::numeric_limits<int>::max());
+        };
+        ImGui::SetNextItemWidth(-1);if(ImGui::InputInt("X##pos",&positionX,0,0))moveSelection(positionDelta(positionX,b.pos.x),0,0);
+        ImGui::SetNextItemWidth(-1);if(ImGui::InputInt("Y##pos",&positionY,0,0))moveSelection(0,positionDelta(positionY,b.pos.y),0);
+        ImGui::SetNextItemWidth(-1);if(ImGui::InputInt("Z##pos",&positionZ,0,0))moveSelection(0,0,positionDelta(positionZ,b.pos.z));
+        if(ImGui::Button("Left -X",ImVec2(-1,0)))moveSelection(-1,0,0);if(ImGui::Button("Right +X",ImVec2(-1,0)))moveSelection(1,0,0);
+        if(ImGui::Button("Forward +Y",ImVec2(-1,0)))moveSelection(0,1,0);if(ImGui::Button("Back -Y",ImVec2(-1,0)))moveSelection(0,-1,0);
+        if(ImGui::Button("Up +Z",ImVec2(-1,0)))moveSelection(0,0,1);if(ImGui::Button("Down -Z",ImVec2(-1,0)))moveSelection(0,0,-1);
+        ImGui::Spacing();ImGui::Text("Orientation (Z is up)");
         static constexpr int axisValues[6]={-3,-1,-2,1,2,3};
         auto axisIndex=[&](int v){for(int i=0;i<6;i++)if(axisValues[i]==v)return i;return 3;};
         int xi=axisIndex(b.xaxis),zi=axisIndex(b.zaxis);
-        ImGui::SetNextItemWidth(90);if(ImGui::Combo("X axis",&xi,"-Z\0-X\0-Y\0+X\0+Y\0+Z\0")){int candidate=axisValues[xi];if(std::abs(dot(axis(candidate),axis(b.zaxis)))<.5f)b.xaxis=candidate;else xi=axisIndex(b.xaxis);}ImGui::SameLine();ImGui::SetNextItemWidth(90);if(ImGui::Combo("Z axis",&zi,"-Z\0-X\0-Y\0+X\0+Y\0+Z\0")){int candidate=axisValues[zi];if(std::abs(dot(axis(candidate),axis(b.xaxis)))<.5f)b.zaxis=candidate;else zi=axisIndex(b.zaxis);}
-        if(ImGui::Button("Rotate +90° Z")){setOrientation(b,rotateAxisAroundZ(b.xaxis,1),rotateAxisAroundZ(b.zaxis,1));}ImGui::SameLine();if(ImGui::Button("Rotate -90° Z")){setOrientation(b,rotateAxisAroundZ(b.xaxis,-1),rotateAxisAroundZ(b.zaxis,-1));}
-        if(ImGui::Button("Reset rotation")){setOrientation(b,1,3);}
+        ImGui::Text("Local X axis");ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##localXAxis",&xi,"-Z\0-X\0-Y\0+X\0+Y\0+Z\0")){int candidate=axisValues[xi];if(std::abs(dot(axis(candidate),axis(b.zaxis)))<.5f)b.xaxis=candidate;else xi=axisIndex(b.xaxis);}
+        ImGui::Text("Local Z axis (up)");ImGui::SetNextItemWidth(-1);if(ImGui::Combo("##localZAxis",&zi,"-Z\0-X\0-Y\0+X\0+Y\0+Z\0")){int candidate=axisValues[zi];if(std::abs(dot(axis(candidate),axis(b.xaxis)))<.5f)b.zaxis=candidate;else zi=axisIndex(b.zaxis);}
+        if(ImGui::Button("Rotate +90° around Z (up)",ImVec2(-1,0))){setOrientation(b,rotateAxisAroundZ(b.xaxis,1),rotateAxisAroundZ(b.zaxis,1));}if(ImGui::Button("Rotate -90° around Z (up)",ImVec2(-1,0))){setOrientation(b,rotateAxisAroundZ(b.xaxis,-1),rotateAxisAroundZ(b.zaxis,-1));}
+        if(ImGui::Button("Reset rotation",ImVec2(-1,0))){setOrientation(b,1,3);}
         ImGui::Spacing();ImGui::Text("Dimensions");
         const bool canResize=state.blockShapes.contains(lower(b.shapeID));
-        if(canResize){
+        if(multiSelection){
+            const V3 overall=selectedWorldSize();
+            ImGui::TextDisabled("Overall size of selected parts");
+            ImGui::Text("Width (X): %.1f",overall.x);
+            ImGui::Text("Depth (Y): %.1f",overall.y);
+            ImGui::Text("Height (Z, up): %.1f",overall.z);
+        }else if(canResize){
             bool dimensionsChanged=false;
-            ImGui::SetNextItemWidth(62);dimensionsChanged|=ImGui::InputInt("W##dim",&b.bounds.x);ImGui::SameLine();ImGui::SetNextItemWidth(62);dimensionsChanged|=ImGui::InputInt("H##dim",&b.bounds.y);ImGui::SameLine();ImGui::SetNextItemWidth(62);dimensionsChanged|=ImGui::InputInt("D##dim",&b.bounds.z);
+            ImGui::Text("Width");ImGui::SetNextItemWidth(-1);dimensionsChanged|=ImGui::InputInt("##dimWidth",&b.bounds.x);
+            // Blueprint bounds are stored in local X/Y/Z order. With Scrap
+            // Mechanic's Z-up basis, local Z is height and local Y is depth.
+            ImGui::Text("Height");ImGui::SetNextItemWidth(-1);dimensionsChanged|=ImGui::InputInt("##dimHeight",&b.bounds.z);
+            ImGui::Text("Depth");ImGui::SetNextItemWidth(-1);dimensionsChanged|=ImGui::InputInt("##dimDepth",&b.bounds.y);
             b.bounds.x=std::clamp(b.bounds.x,1,256);b.bounds.y=std::clamp(b.bounds.y,1,256);b.bounds.z=std::clamp(b.bounds.z,1,256);
             if(dimensionsChanged)b.hasBounds=b.bounds.x!=1||b.bounds.y!=1||b.bounds.z!=1;
         }else{
             const V3 dimensions=shapeSize(b);
             ImGui::TextDisabled("Part footprint: %.0f × %.0f × %.0f (fixed by game)",dimensions.x,dimensions.y,dimensions.z);
         }
-        int colorInt = 0;
-        colorValue(b.color, colorInt);
+        const int colorInt = displayColor(b);
         char hex[16];
         snprintf(hex, sizeof(hex), "%06X", colorInt);
         const ImVec4 previewColor(
@@ -979,21 +1088,19 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
             ((colorInt >> 8) & 255) / 255.f,
             (colorInt & 255) / 255.f,
             1.f);
-        ImGui::Text("Color");
-        ImGui::SameLine();
+        ImGui::TextUnformatted(multiSelection?"Color · all selected parts":"Color");
         ImGui::PushID(state.selection);
         if (ImGui::ColorButton("##colorPreview", previewColor, ImGuiColorEditFlags_NoTooltip, ImVec2(24, 22)))
             ImGui::OpenPopup("ColorPickerPopup");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(100);
+        ImGui::SameLine();ImGui::TextDisabled("Click square to choose");
+        ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##hex", hex, sizeof(hex), ImGuiInputTextFlags_CharsHexadecimal) && strlen(hex) == 6) {
             const int value = (int)strtoul(hex, nullptr, 16);
             char normalized[7];
             snprintf(normalized, sizeof(normalized), "%06x", value);
-            b.color = normalized;
+            setSelectionColor(normalized);
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("#RRGGBB");
+        ImGui::TextDisabled("Hex · #RRGGBB");
         if (ImGui::BeginPopup("ColorPickerPopup")) {
             float pickerColor[3] = {previewColor.x, previewColor.y, previewColor.z};
             if (ImGui::ColorPicker3("##colorPicker", pickerColor,
@@ -1003,25 +1110,21 @@ void render(json& blueprint,const std::filesystem::path& blueprintPath,
                 const int blue = (int)(pickerColor[2] * 255.f + 0.5f);
                 char normalized[7];
                 snprintf(normalized, sizeof(normalized), "%02x%02x%02x", red, green, blue);
-                b.color = normalized;
+                setSelectionColor(normalized);
             }
             ImGui::EndPopup();
         }
         ImGui::PopID();
         ImGui::Spacing();auto m=meshFor(b.shapeID);if(coarsePreview)ImGui::TextDisabled(m&&m->loaded?"Large scene · mesh preview simplified":"Large scene · cuboid preview");else if(m&&m->loaded)ImGui::TextColored(ImVec4(.45f,.84f,.65f,1),"Game model loaded");else if(state.blockShapes.contains(lower(b.shapeID)))ImGui::TextDisabled("Built-in block · cuboid preview");else {ImGui::TextDisabled("Box preview · model unavailable");if(m&&!m->detail.empty())ImGui::TextWrapped("%s",m->detail.c_str());}
         ImGui::Spacing();
-        if(ImGui::Button("Remove selected part")){
-            const int bodyIndex=b.bodyIndex,childIndex=b.childIndex;
-            Parser::applyBlockListToNode(blocks,blueprint);
-            if(Parser::removeBlockFromNode(blueprint,bodyIndex,childIndex)){
-                blocks=Parser::parseBlueprint(blueprint);
-                state.selection=-1;state.dragBlock=-1;state.dragAxis=0;
-                state.error="Part removed from the editor. Save Blueprint to write the change to disk.";
-            }else state.error="Could not remove this part from the blueprint.";
-        }
+        const char* removeLabel=state.selectionSet.size()>1?"Remove selected parts":"Remove selected part";
+        if(ImGui::Button(removeLabel,ImVec2(-1,0))&&!removeSelection())state.error="Could not remove the selected parts from the blueprint.";
     }
     ImGui::Separator();ImGui::Text("Scene");size_t loadedParts=0,blockParts=0,missingParts=0;for(const auto& b:blocks){auto id=lower(b.shapeID);auto m=meshFor(b.shapeID);if(m&&m->loaded)loadedParts++;else if(state.blockShapes.contains(id))blockParts++;else missingParts++;}ImGui::Text("%zu parts",blocks.size());ImGui::Text("%zu mesh assets · %zu built-in block previews",loadedParts,blockParts);if(missingParts)ImGui::TextColored(ImVec4(1.f,.68f,.34f,1.f),"%zu parts using fallback boxes",missingParts);if(coarsePreview)ImGui::TextDisabled("Large scene uses cuboid previews to avoid dropping mesh triangles.");if(!state.renderError.empty())ImGui::TextColored(ImVec4(1.f,.48f,.36f,1.f),"3D renderer: %s",state.renderError.c_str());
     if(!state.error.empty())ImGui::TextWrapped("%s",state.error.c_str());
-    ImGui::TextDisabled("Drag an axis arrow to move only along it   Right-drag: orbit   Middle-drag: pan   Scroll: zoom");ImGui::EndChild();ImGui::End();
+    ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+    ImGui::TextWrapped("Shift-click adds to selection. Drag an axis arrow to move selected parts along it. Right-drag to orbit, middle-drag to pan, and scroll to zoom.");
+    ImGui::PopStyleColor();
+    ImGui::EndChild();ImGui::End();
 }
 }

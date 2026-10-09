@@ -1,0 +1,1 @@
+#define IDR_ITEMS_JSON 101

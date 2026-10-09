@@ -5,6 +5,8 @@
 #include "helpers/blueprint_viewport.hpp"
 #include "helpers/scrap_parser.hpp"
 #include "menu_helper.hpp"
+#include "resource.h"
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 
@@ -21,6 +23,7 @@ json blueprint;
 json items;
 ProgramStatus programStatus = BLUEPRINT_SELECT;
 bool refreshBlueprintsRequested = false;
+ImGuiID blueprintLoaderDockId = 0;
 void loadBlueprintTextures();
 
 void renderImgui() {
@@ -31,7 +34,7 @@ void renderImgui() {
 	switch (programStatus)
 	{
 	case BLUEPRINT_SELECT:
-		renderBlueprintLoader(loadedBlueprints, programStatus, blueprint, selectedItem, blockList, refreshBlueprintsRequested);
+		renderBlueprintLoader(loadedBlueprints, programStatus, blueprint, selectedItem, blockList, refreshBlueprintsRequested, blueprintLoaderDockId);
 
 		break;
 	case BLUEPRINT_EDIT:
@@ -41,6 +44,7 @@ void renderImgui() {
 	default:
 		break;
 	}
+	renderHelpPage(blueprintLoaderDockId);
 }
 
 void loadBlueprintTextures() {
@@ -78,8 +82,42 @@ void loadBlueprintTextures() {
 	}
 }
 
+bool loadEmbeddedItems(json& outItems) {
+	const HMODULE module = GetModuleHandleW(nullptr);
+	const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(IDR_ITEMS_JSON), RT_RCDATA);
+	if (!resource) {
+		std::cerr << "Embedded items.json resource was not found. Error " << GetLastError() << std::endl;
+		return false;
+	}
+	const DWORD resourceSize = SizeofResource(module, resource);
+	const HGLOBAL loadedResource = LoadResource(module, resource);
+	const auto* resourceData = static_cast<const char*>(LockResource(loadedResource));
+	if (!loadedResource || !resourceData || resourceSize == 0) {
+		std::cerr << "Embedded items.json resource could not be read." << std::endl;
+		return false;
+	}
+	try {
+		outItems = json::parse(resourceData, resourceData + resourceSize);
+		return true;
+	}
+	catch (const std::exception& e) {
+		std::cerr << "Embedded items.json is invalid: " << e.what() << std::endl;
+		return false;
+	}
+}
+
+void openDiagnosticConsole() {
+	if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED)
+		AllocConsole();
+	FILE* output = nullptr;
+	FILE* errors = nullptr;
+	freopen_s(&output, "CONOUT$", "w", stdout);
+	freopen_s(&errors, "CONOUT$", "w", stderr);
+}
+
 int main(int argc, char** argv) {
 	if (argc == 3 && std::string(argv[1]) == "--inspect-model") {
+		openDiagnosticConsole();
 		const auto report = BlueprintViewport::inspectModelFile(std::filesystem::path(argv[2]));
 		std::cout << (report.loaded ? "loaded" : "failed") << ": " << report.vertices
 			<< " vertices, " << report.triangles << " triangles";
@@ -88,6 +126,7 @@ int main(int argc, char** argv) {
 		return report.loaded ? 0 : 1;
 	}
 	if (argc == 3 && std::string(argv[1]) == "--inspect-shape") {
+		openDiagnosticConsole();
 		const auto report = BlueprintViewport::inspectShape(argv[2]);
 		std::cout << (report.loaded ? "loaded" : "failed") << ": " << report.vertices
 			<< " vertices, " << report.triangles << " triangles";
@@ -100,18 +139,7 @@ int main(int argc, char** argv) {
 		std::cerr << "Failed to initialize the OpenGL 3.3 editor window. Update your graphics driver or check that a compatible GPU is available." << std::endl;
 		return 1;
 	}
-	{
-		wchar_t executablePath[MAX_PATH]{};
-		const DWORD pathLength = GetModuleFileNameW(nullptr, executablePath, MAX_PATH);
-		std::filesystem::path itemsPath = pathLength > 0 && pathLength < MAX_PATH
-			? std::filesystem::path(executablePath).parent_path() / "items.json"
-			: std::filesystem::current_path() / "items.json";
-		std::ifstream itemsFile(itemsPath);
-		if (itemsFile.is_open()) {
-			try { itemsFile >> items; }
-			catch (const std::exception& e) { std::cerr << "Failed to load items.json: " << e.what() << std::endl; }
-		}
-	}
+	loadEmbeddedItems(items);
 	// Load blueprint folders and read names + icons
 	loadBlueprintTextures();
 

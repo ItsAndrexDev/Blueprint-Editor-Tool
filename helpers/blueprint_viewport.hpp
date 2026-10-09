@@ -13,7 +13,9 @@ struct ModelLoadReport {
 };
 ModelLoadReport inspectModelFile(const std::filesystem::path& path);
 ModelLoadReport inspectShape(const std::string& shapeId);
+void resetSelection();
 void shutdownRenderer();
 void render(json& blueprint, const std::filesystem::path& blueprintPath,
-            std::vector<Parser::Block>& blocks, const json& items);
+            std::vector<Parser::Block>& blocks, const json& items,
+            const std::string& blueprintName, bool& backToSelectionRequested);
 }

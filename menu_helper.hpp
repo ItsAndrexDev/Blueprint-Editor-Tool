@@ -24,8 +24,10 @@ void renderBlueprintLoader(std::vector<BlueprintItem>& loadedPrints,
 	json& outBlueprint,
 	BlueprintItem& itemSelected,
 	std::vector<Parser::Block>& blocks,
-	bool& refreshRequested) {
+	bool& refreshRequested,
+	ImGuiID& helpDockId) {
 	ImGui::Begin("Blueprint Loader");
+	helpDockId = ImGui::GetWindowDockID();
 	ImGui::TextWrapped("Select a blueprint to load:");
 	static char searchBuffer[128] = "";
 	const ImGuiStyle& style = ImGui::GetStyle();
@@ -61,6 +63,7 @@ void renderBlueprintLoader(std::vector<BlueprintItem>& loadedPrints,
 					outBlueprint = std::move(candidateBlueprint);
 					blocks = std::move(candidateBlocks);
 					itemSelected = item;
+					BlueprintViewport::resetSelection();
 					status = BLUEPRINT_EDIT;
 					std::cout << "Selected Blueprint: " << item.name << std::endl;
 				}
@@ -85,9 +88,44 @@ void renderBlueprintLoader(std::vector<BlueprintItem>& loadedPrints,
 	ImGui::End();   // moved outside the loop
 }
 void renderBlueprintEditor(ProgramStatus& status, json& blueprint, BlueprintItem& itemSelected, std::vector<Parser::Block>& blocks, const json& items) {
-	BlueprintViewport::render(blueprint, itemSelected.paths.folderPath / "blueprint.json", blocks, items);
-	ImGui::Begin("Blueprint");
-	ImGui::TextWrapped("Editing: %s", itemSelected.name.c_str());
-	if (ImGui::Button("Back to Selection")) status = BLUEPRINT_SELECT;
+	bool backToSelectionRequested = false;
+	BlueprintViewport::render(blueprint, itemSelected.paths.folderPath / "blueprint.json", blocks, items,
+		itemSelected.name, backToSelectionRequested);
+	if (backToSelectionRequested) status = BLUEPRINT_SELECT;
+}
+
+
+void renderHelpPage(ImGuiID loaderDockId) {
+	if (loaderDockId != 0) ImGui::SetNextWindowDockID(loaderDockId, ImGuiCond_FirstUseEver);
+	ImGui::Begin("Help");
+	ImGui::Text("Scrap Mechanic Blueprint Editor");
+	ImGui::TextWrapped("A quick guide to finding, editing, and saving your creations.");
+	ImGui::Separator();
+	ImGui::Text("Getting started");
+	ImGui::BulletText("Open the Blueprint Loader tab and choose a blueprint. Use the search box to find one by name.");
+	ImGui::BulletText("The 3D view shows the parts in your creation. Click a part to select it and edit it in the Inspector.");
+	ImGui::BulletText("Click Save Blueprint after making changes. The edited blueprint is saved in its existing folder.");
+	ImGui::Spacing();
+	ImGui::Text("Selection and movement");
+	ImGui::BulletText("Click a part to select it. Hold Shift and click more parts to add them to your selection.");
+	ImGui::BulletText("Drag one of the +X, -X, +Y, -Y, +Z, or -Z arrows to move all selected parts together along that direction.");
+	ImGui::BulletText("The game uses Z as up. The arrow you pull controls the only direction of movement.");
+	ImGui::BulletText("For block dimensions, local Z is Height and local Y is Depth. Orientation controls label the upright axis as local Z.");
+	ImGui::BulletText("Position fields, movement buttons, and axis arrows move the whole selection. Rotation edits the active part. Color changes apply to every selected part.");
+	ImGui::BulletText("With one part selected, Dimensions lets you resize built-in blocks. With multiple parts selected, it shows their combined world-space Width (X), Depth (Y), and Height (Z).");
+	ImGui::BulletText("Press Delete to remove all selected parts.");
+	ImGui::Spacing();
+	ImGui::Text("Camera and part appearance");
+	ImGui::BulletText("Right-drag to orbit the camera, middle-drag to pan, and scroll to zoom. Reset view returns to the default camera.");
+	ImGui::BulletText("Use the Orientation controls to rotate a part. Built-in blocks can be resized by Width, Height, and Depth.");
+	ImGui::BulletText("Click the color square to open the color picker, or type a six-digit hex color such as 3E9FFE. With multiple parts selected, this changes all their colors.");
+	ImGui::Spacing();
+	ImGui::Text("Shortcuts");
+	ImGui::BulletText("Shift + click: add a part to the current selection.");
+	ImGui::BulletText("Ctrl + S: save the edited blueprint.");
+	ImGui::BulletText("Delete: remove the selected part or parts.");
+	ImGui::BulletText("Right mouse + drag: orbit. Middle mouse + drag: pan. Mouse wheel: zoom.");
+	ImGui::Spacing();
+	ImGui::TextWrapped("If the editor reports a Survival-only part, Scrap Mechanic Creative mode cannot spawn that part. Remove it or use a Survival world.");
 	ImGui::End();
 }

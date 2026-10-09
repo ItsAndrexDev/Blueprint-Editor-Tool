@@ -1,8 +1,23 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "gui_manager.hpp"
 #include "helpers/stb_image.h"
+#include "imgui/imgui_internal.h"
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
+
+namespace {
+bool hasLegacyBlueprintWindow(const char* iniFilename) {
+	if (!iniFilename || !*iniFilename) return false;
+	std::ifstream settings(iniFilename);
+	std::string line;
+	while (std::getline(settings, line))
+		if (line == "[Window][Blueprint]") return true;
+	return false;
+}
+}
 
 GuiManager::Gui::Gui(int width, int height, const char* title) {
 	if (!glfwInit()) return;
@@ -37,6 +52,10 @@ GuiManager::Gui::Gui(int width, int height, const char* title) {
 	ImGui::CreateContext();
 	imguiContextCreated = true;
 	io = &ImGui::GetIO(); (void)io;
+	std::error_code iniError;
+	const bool hasSavedLayout = io->IniFilename && *io->IniFilename &&
+		std::filesystem::exists(std::filesystem::path(io->IniFilename), iniError);
+	defaultDockLayoutPending = !hasSavedLayout || hasLegacyBlueprintWindow(io->IniFilename);
 	io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // Allow docking
 	io->ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
@@ -102,6 +121,20 @@ void GuiManager::Gui::SetupDockSpace() {
 
 	ImGuiID dockspace_id = ImGui::GetID("AppDockSpace");
 	ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+	if (defaultDockLayoutPending) {
+		ImGui::DockBuilderRemoveNode(dockspace_id);
+		ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+		ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+		// Keep all primary pages together as tabs. The loader is selected on
+		// first launch because it is the app's initial page.
+		ImGui::DockBuilderDockWindow("Help", dockspace_id);
+		ImGui::DockBuilderDockWindow("Blueprint Editor", dockspace_id);
+		ImGui::DockBuilderDockWindow("Blueprint Loader", dockspace_id);
+		if (ImGuiDockNode* dockNode = ImGui::DockBuilderGetNode(dockspace_id))
+			dockNode->SelectedTabId = ImHashStr("Blueprint Loader");
+		ImGui::DockBuilderFinish(dockspace_id);
+		defaultDockLayoutPending = false;
+	}
 
 	ImGui::End();
 }

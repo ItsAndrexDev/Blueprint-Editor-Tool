@@ -137,7 +137,10 @@ Parser::Block Parser::parseBlock(const json& blockJson, int bodyIndex, int child
 	if (blockJson.is_object()) {
 		block.xaxis = readInteger(blockJson, "xaxis", 1);
 		block.zaxis = readInteger(blockJson, "zaxis", 3);
-		if (blockJson.contains("color") && blockJson["color"].is_string()) block.color = blockJson["color"].get<std::string>();
+		if (blockJson.contains("color") && blockJson["color"].is_string()) {
+			block.color = blockJson["color"].get<std::string>();
+			block.hasColor = true;
+		}
 		if (blockJson.contains("shapeId") && blockJson["shapeId"].is_string()) block.shapeID = blockJson["shapeId"].get<std::string>();
 	}
 	auto validAxis = [](int axis) { return axis == 1 || axis == -1 || axis == 2 || axis == -2 || axis == 3 || axis == -3; };
@@ -194,7 +197,8 @@ void Parser::applyBlockListToNode(const std::vector<Parser::Block>& blockVector,
 			blueprintJson["bodies"][block.bodyIndex]["childs"][block.childIndex].erase("bounds");
 		}
 
-		child["color"] = block.color;
+		if (block.hasColor) child["color"] = block.color;
+		else child.erase("color");
 		child["shapeId"] = block.shapeID;
 		child["xaxis"] = block.xaxis;
 		child["zaxis"] = block.zaxis;

@@ -1,2 +1,0 @@
-D:\bpeditor\build-freeze-verified\items.json
-D:\bpeditor\x64\Release\items.json

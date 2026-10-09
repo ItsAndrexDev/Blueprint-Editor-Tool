@@ -18,7 +18,7 @@ namespace GuiManager
 		Gui(int width, int height, const char* title);
 		~Gui();
 
-		static void SetupDockSpace();
+		void SetupDockSpace();
 
 	private:
 		bool glfwStarted = false;
@@ -26,6 +26,7 @@ namespace GuiManager
 		bool glfwBackendInitialized = false;
 		bool openglBackendInitialized = false;
 		bool ready = false;
+		bool defaultDockLayoutPending = false;
 	};
 	void newFrame();
 	void endFrame(GLFWwindow* window, ImGuiIO* io);
