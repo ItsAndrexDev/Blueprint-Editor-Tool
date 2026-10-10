@@ -32,8 +32,8 @@ namespace BlueprintViewport {
 		V3 cross(V3 a, V3 b) { return { a.y * b.z - a.z * b.y,a.z * b.x - a.x * b.z,a.x * b.y - a.y * b.x }; }
 		V3 norm(V3 a) { float n = std::sqrt(dot(a, a)); return n > 1e-7f ? a * (1.f / n) : V3{ 0,1,0 }; }
 
-		struct Mesh { std::vector<V3> vertices; std::vector<V3> normals; std::vector<std::array<float, 2>> uvs; std::vector<uint32_t> indices; V3 boundsMin{}, boundsMax{}; bool hasBounds{}; bool loaded{}; std::string detail; };
-		struct Entry { std::vector<std::filesystem::path> models; std::filesystem::path diffuseTexture; std::string name; };
+		struct Mesh { std::vector<V3> vertices; std::vector<V3> normals; std::vector<std::array<float, 2>> uvs; std::vector<uint32_t> indices; std::vector<std::string> triangleMaterials; V3 boundsMin{}, boundsMax{}; bool hasBounds{}; bool loaded{}; std::string detail; };
+		struct Entry { std::vector<std::filesystem::path> models; std::filesystem::path diffuseTexture; std::unordered_map<std::string, std::filesystem::path> materialTextures; std::string name; bool centerMeshOnFootprint{}; };
 		struct State {
 			std::unordered_map<std::string, Entry> catalog;
 			std::unordered_set<std::string> blockShapes;
@@ -330,6 +330,15 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									};
 								state.shapeSizes[id] = { readSize("x"),readSize("y"),readSize("z") };
 							}
+							else if (part.contains("sphere") && part["sphere"].is_object()) {
+								// Spherical parts still occupy a full diameter-sized grid footprint.
+								// Treating them as the one-cell fallback shifts centered meshes by
+								// three cells (e.g. the gyro-seat bubble over its seven-cell base).
+								const auto& sphere = part["sphere"];
+								const float diameter = sphere.contains("diameter") && sphere["diameter"].is_number()
+									? std::clamp(sphere["diameter"].get<float>(), 1.f, 256.f) : 1.f;
+								state.shapeSizes[id] = { diameter,diameter,diameter };
+							}
 							else if (part.contains("cylinder") && part["cylinder"].is_object()) {
 								const auto& cylinder = part["cylinder"];
 								auto readCylinderSize = [&](const char* key) {
@@ -357,27 +366,52 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 							if (!rend->is_object() || !rend->contains("lodList") || !(*rend)["lodList"].is_array() || (*rend)["lodList"].empty())continue;
 							Entry entry;
 							if (part.contains("name") && part["name"].is_string())entry.name = part["name"].get<std::string>();
+							const auto normalizedPartName = lower(entry.name);
+							// The water cannon's FBX pivot is displaced from its footprint. Keep
+							// the Totebot bobblehead pivots intact: those multi-piece models use
+							// authored head/plate offsets to remain separated when placed side by side.
+							entry.centerMeshOnFootprint = normalizedPartName.find("watergun") != std::string::npos;
 							// Renderables describe diffuse images in either subMeshMap (newer
 							// interactive assets) or subMeshList (vehicle and legacy assets).
 							for (const auto& lod : (*rend)["lodList"]) {
 								if (!lod.is_object())continue;
+								auto rememberMaterial = [&](const std::string& name, const json& material) {
+									if (!material.is_object() || (material.contains("hidden") && material["hidden"].is_boolean() && material["hidden"].get<bool>()))return;
+									std::string texture;
+									if (material.contains("textures") && material["textures"].is_object() && material["textures"].contains("diffuse") && material["textures"]["diffuse"].is_string())texture = material["textures"]["diffuse"].get<std::string>();
+									else if (material.contains("textureList") && material["textureList"].is_array() && !material["textureList"].empty() && material["textureList"][0].is_string())texture = material["textureList"][0].get<std::string>();
+									if (!texture.empty()) { auto resolved = resolveGameAsset(texture); if (!resolved.empty())entry.materialTextures[lower(name)] = std::move(resolved); }
+								};
+								if (lod.contains("subMeshMap") && lod["subMeshMap"].is_object())for (auto material = lod["subMeshMap"].begin(); material != lod["subMeshMap"].end(); ++material)rememberMaterial(material.key(), material.value());
 								auto readDiffuse = [&](const json& material) {
 									std::string texture;
+									if (material.is_object() && material.contains("hidden") && material["hidden"].is_boolean() && material["hidden"].get<bool>())return;
 									if (material.is_object() && material.contains("textures") && material["textures"].is_object() && material["textures"].contains("diffuse") && material["textures"]["diffuse"].is_string())texture = material["textures"]["diffuse"].get<std::string>();
 									else if (material.is_object() && material.contains("textureList") && material["textureList"].is_array() && !material["textureList"].empty() && material["textureList"][0].is_string())texture = material["textureList"][0].get<std::string>();
 									if (!texture.empty())entry.diffuseTexture = resolveGameAsset(texture);
 								};
 								if (lod.contains("subMeshList") && lod["subMeshList"].is_array())for (const auto& material : lod["subMeshList"]) { readDiffuse(material); if (!entry.diffuseTexture.empty())break; }
-								if (entry.diffuseTexture.empty() && lod.contains("subMeshMap") && lod["subMeshMap"].is_object())for (auto it = lod["subMeshMap"].begin(); it != lod["subMeshMap"].end(); ++it) {
-									readDiffuse(it.value());
-									if (!entry.diffuseTexture.empty())break;
+								if (lod.contains("subMeshList") && lod["subMeshList"].is_array())for (size_t materialIndex = 0; materialIndex < lod["subMeshList"].size(); ++materialIndex)rememberMaterial(std::to_string(materialIndex), lod["subMeshList"][materialIndex]);
+								if (entry.diffuseTexture.empty() && lod.contains("subMeshMap") && lod["subMeshMap"].is_object()) {
+									// Submesh maps are ordered by key, not by visual importance. Lights
+									// list light-cone/flare textures before the actual lamp body; using
+									// that first texture for the whole mesh makes the fixture disappear.
+									std::vector<std::pair<int, const json*>> materials;
+									for (auto it = lod["subMeshMap"].begin(); it != lod["subMeshMap"].end(); ++it) {
+										int score = 0;
+										const auto key = lower(it.key());
+										if (key.find("mesh") != std::string::npos || key.find("body") != std::string::npos || key.find("turretseat05") != std::string::npos)score += 10;
+										if (key.find("glass") != std::string::npos || key.find("lightcone") != std::string::npos || key.find("flare") != std::string::npos)score -= 5;
+										materials.emplace_back(score, &it.value());
+									}
+									std::stable_sort(materials.begin(), materials.end(), [](const auto& a, const auto& b) {return a.first > b.first; });
+									for (const auto& material : materials) { readDiffuse(*material.second); if (!entry.diffuseTexture.empty())break; }
 								}
 								if (!entry.diffuseTexture.empty())break;
 							}
-							// Blueprint previews use the renderable's static mesh. pose0 is an
-							// animation pose asset, not a replacement for the complete static
-							// assembly (notably for suspension models). Keep it as a decoder
-							// fallback only when the corresponding mesh cannot be loaded.
+							// The renderable mesh is the part's complete static geometry. pose0
+							// is animated state data (beam cones and moving subparts included),
+							// so retain it only as fallback when mesh cannot be decoded.
 							for (const auto& lod : (*rend)["lodList"]) {
 								if (!lod.is_object())continue;
 								auto addModel = [&](const char* key) {
@@ -386,8 +420,12 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									if (model.empty() || !std::filesystem::is_regular_file(model))return;
 									if (std::find(entry.models.begin(), entry.models.end(), model) == entry.models.end())entry.models.push_back(std::move(model));
 								};
-								addModel("mesh");
-								addModel("pose0");
+								// The warehouse spotlight's static mesh is only the unlit fixture. Its
+								// active pose contains the assembled lamp housing; prefer that complete
+								// model for this one part while leaving other pose-driven lights static.
+								const bool warehouseSpotlight = normalizedPartName.find("warehousespotlight") != std::string::npos || normalizedPartName.find("warehousespotligt") != std::string::npos;
+								if (warehouseSpotlight) { addModel("pose0"); addModel("mesh"); }
+								else { addModel("mesh"); addModel("pose0"); }
 							}
 							if (entry.models.empty())continue;
 							if (!entry.diffuseTexture.empty())state.shapeDiffuseTextures[id] = entry.diffuseTexture;
@@ -525,12 +563,18 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 			for (const auto& child : node.children)if (child.name == name)return &child;
 			return nullptr;
 		}
-		bool geometryData(const FNode& node, Mesh& mesh, const std::vector<FbxTransform>& modelChain) {
+		bool geometryData(const FNode& node, Mesh& mesh, const std::vector<FbxTransform>& modelChain, const std::vector<std::string>& materialNames) {
 			const FProp* verts = nullptr; const FProp* faces = nullptr;
 			for (const auto& c : node.children) { if (c.name == "Vertices" && !c.props.empty())verts = &c.props[0]; if (c.name == "PolygonVertexIndex" && !c.props.empty())faces = &c.props[0]; }
 			if (!verts || !faces || verts->arr.size() < 9 || faces->arr.size() < 3 || verts->arr.size() % 3)return false;
 			const FProp* uvValues = nullptr; const FProp* uvIndices = nullptr;
 			std::string uvMapping, uvReference;
+			const FProp* materialIndices = nullptr;
+			std::string materialMapping;
+			if (const FNode* layer = childNamed(node, "LayerElementMaterial"))for (const auto& c : layer->children) {
+				if (c.name == "Materials" && !c.props.empty())materialIndices = &c.props[0];
+				else if (c.name == "MappingInformationType" && !c.props.empty())materialMapping = c.props[0].text;
+			}
 			if (const FNode* layer = childNamed(node, "LayerElementUV"))for (const auto& c : layer->children) {
 				if (c.name == "UV" && !c.props.empty())uvValues = &c.props[0];
 				else if (c.name == "UVIndex" && !c.props.empty())uvIndices = &c.props[0];
@@ -557,16 +601,20 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 				return uv;
 			};
 			std::vector<std::pair<uint32_t, std::array<float, 2>>> poly;
-			size_t polygonVertex = 0;
+			size_t polygonVertex = 0, polygon = 0;
 			for (double d : faces->arr) {
 				const int64_t raw = (int64_t)d; const bool end = raw < 0;
 				const uint64_t ix = (uint64_t)(end ? -raw - 1 : raw);
 				if (ix >= verts->arr.size() / 3) { poly.clear(); ++polygonVertex; continue; }
 				poly.emplace_back((uint32_t)ix, uvFor(polygonVertex++, (uint32_t)ix));
 				if (end) {
+					int materialIndex = -1;
+					if (materialIndices && (materialMapping == "ByPolygon" || materialMapping.empty()) && polygon < materialIndices->arr.size())materialIndex = (int)materialIndices->arr[polygon];
+					const std::string materialName = materialIndex >= 0 && (size_t)materialIndex < materialNames.size() ? lower(materialNames[(size_t)materialIndex]) : std::string{};
 					std::vector<uint32_t> polygonIndices; polygonIndices.reserve(poly.size());
 					for (const auto& [vertexIndex, uv] : poly) { polygonIndices.push_back((uint32_t)mesh.vertices.size()); mesh.vertices.push_back(transformedPoint(vertexIndex)); mesh.uvs.push_back(uv); }
-					for (size_t k = 1; k + 1 < polygonIndices.size(); k++) { mesh.indices.push_back(polygonIndices[0]); mesh.indices.push_back(polygonIndices[k]); mesh.indices.push_back(polygonIndices[k + 1]); }
+					for (size_t k = 1; k + 1 < polygonIndices.size(); k++) { mesh.indices.push_back(polygonIndices[0]); mesh.indices.push_back(polygonIndices[k]); mesh.indices.push_back(polygonIndices[k + 1]); mesh.triangleMaterials.push_back(materialName); }
+					++polygon;
 					poly.clear();
 				}
 			}
@@ -574,12 +622,17 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 		}
 		void loadFbxScene(const std::vector<FNode>& roots, Mesh& mesh) {
 			struct Link { int64_t child{}, parent{}; };
-			std::unordered_map<int64_t, const FNode*> geometryById, modelById;
+			std::unordered_map<int64_t, const FNode*> geometryById, modelById, materialById;
 			std::unordered_map<int64_t, int64_t> geometryParent, modelParent;
+			std::unordered_map<int64_t, std::vector<std::string>> modelMaterials;
 			std::vector<Link> links;
 			auto visit = [&](auto&& self, const FNode& node)->void {
-				if (node.name == "Geometry" || node.name == "Model") {
-					int64_t id; if (numericProperty(node, 0, id))(node.name == "Geometry" ? geometryById : modelById)[id] = &node;
+				if (node.name == "Geometry" || node.name == "Model" || node.name == "Material") {
+					int64_t id; if (numericProperty(node, 0, id)) {
+						if (node.name == "Geometry")geometryById[id] = &node;
+						else if (node.name == "Model")modelById[id] = &node;
+						else materialById[id] = &node;
+					}
 				}
 				if (node.name == "C" && node.props.size() >= 3) { int64_t child, parent; if (numericProperty(node, 1, child) && numericProperty(node, 2, parent))links.push_back({ child,parent }); }
 				for (const auto& child : node.children)self(self, child);
@@ -588,17 +641,30 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 			for (const auto& link : links) {
 				if (geometryById.contains(link.child) && modelById.contains(link.parent))geometryParent[link.child] = link.parent;
 				if (modelById.contains(link.child) && modelById.contains(link.parent))modelParent[link.child] = link.parent;
+				if (materialById.contains(link.child) && modelById.contains(link.parent)) {
+					const auto* material = materialById[link.child];
+					std::string name = material->props.size() > 1 ? material->props[1].text : std::string{};
+					const auto separator = name.rfind("::");
+					if (separator != std::string::npos)name.erase(0, separator + 2);
+					modelMaterials[link.parent].push_back(lower(name));
+				}
 			}
 			for (const auto& [id, geometry] : geometryById) {
 				std::vector<FbxTransform> chain;
 				std::unordered_map<int64_t, bool> seen;
 				auto parent = geometryParent.find(id);
+				const int64_t geometryModelId = parent != geometryParent.end() ? parent->second : 0;
 				while (parent != geometryParent.end() && modelById.contains(parent->second) && !seen.contains(parent->second)) {
 					const int64_t modelId = parent->second; seen[modelId] = true;
 					chain.push_back(transformFromProperties(*modelById[modelId], "Lcl Translation", "Lcl Rotation", "Lcl Scaling"));
 					parent = modelParent.find(modelId);
 				}
-				geometryData(*geometry, mesh, chain);
+				std::vector<std::string> materialNames;
+				if (geometryModelId != 0) {
+					auto materials = modelMaterials.find(geometryModelId);
+					if (materials != modelMaterials.end())materialNames = materials->second;
+				}
+				geometryData(*geometry, mesh, chain, materialNames);
 			}
 		}
 		bool loadFbx(const std::filesystem::path& path, Mesh& mesh) {
@@ -1075,6 +1141,30 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		if (state.selection < 0 || state.selection >= (int)blocks.size())state.selection = -1;
 		if (state.selection >= 0)state.selectionSet.insert(state.selection);
 		auto isSelected = [&](int index) {return index == state.selection || state.selectionSet.contains(index); };
+		auto addTurretSeatSelection = [&](int index) {
+			if (index < 0 || index >= (int)blocks.size())return;
+			const auto& part = blocks[index];
+			constexpr std::string_view sphereId = "42b4c02e-2de5-431e-981a-f42cb7829e68";
+			constexpr std::string_view baseId = "44afe29b-73a8-4892-94c9-f885b238a971";
+			const auto partId = lower(part.shapeID);
+			const bool isSphere = partId == sphereId, isBase = partId == baseId;
+			if (!isSphere && !isBase)return;
+			int mate = -1, nearestZ = std::numeric_limits<int>::max();
+			for (size_t candidate = 0; candidate < blocks.size(); ++candidate) {
+				if ((int)candidate == index)continue;
+				const auto& other = blocks[candidate];
+				if (lower(other.shapeID) != (isSphere ? baseId : sphereId) || other.xaxis != part.xaxis || other.zaxis != part.zaxis)continue;
+				if (other.pos.x != part.pos.x || other.pos.y != part.pos.y)continue;
+				const int dz = std::abs(other.pos.z - part.pos.z);
+				if (dz <= 1 && dz < nearestZ) { nearestZ = dz; mate = (int)candidate; }
+			}
+			if (mate >= 0)state.selectionSet.insert(mate);
+		};
+		auto addSelectionGroup = [&](int index) {
+			if (index < 0 || index >= (int)blocks.size())return;
+			state.selectionSet.insert(index);
+			addTurretSeatSelection(index);
+		};
 		auto synchronizeJointPositions = [&]() {
 			Parser::applyBlockListToNode(blocks, blueprint);
 			if (!blueprint.contains("joints") || !blueprint["joints"].is_array()) return;
@@ -1214,6 +1304,8 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			const GLuint diffuseTexture = imported && diffusePath != state.shapeDiffuseTextures.end() ? diffuseTextureFor(diffusePath->second) : 0;
 			float red = (float)((col >> 16) & 255) / 255.f, green = (float)((col >> 8) & 255) / 255.f, blue = (float)(col & 255) / 255.f;
 			const V3 dimensions = shapeSize(b);
+			const auto catalogEntry = state.catalog.find(lower(b.shapeID));
+			const bool centerMeshOnFootprint = catalogEntry != state.catalog.end() && catalogEntry->second.centerMeshOnFootprint;
 			// Fixed render meshes are authored in game-space units and their origins
 			// are meaningful attachment pivots. Do not scale them to their collision
 			// hull/cylinder or their geometry and pivots drift away from blueprint
@@ -1237,25 +1329,31 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				sc[2] = dimensions.z;
 			}
 			const V3 center = blockCenter(b);
+			const V3 meshCenter = imported && m->hasBounds ? (m->boundsMin + m->boundsMax) * .5f : V3{};
 			// FBX model vertices are authored around their model pivot. Re-centering
 			// each asset to its mesh AABB loses deliberate pivot offsets (notably the
 			// thruster's nozzle/body offset) and disagrees with the game's placement
 			// transform. Scale the authored coordinates, then place that pivot at the
 			// centre of the part's grid footprint.
-			auto world = [&](V3 v) {v.x *= sc[0]; v.y *= sc[1]; v.z *= sc[2]; return orient(v, b) + center; };
+			auto world = [&](V3 v) {
+				if (centerMeshOnFootprint)v = v - meshCenter;
+				v.x *= sc[0]; v.y *= sc[1]; v.z *= sc[2];
+				return orient(v, b) + center;
+			};
 			if (isSelected((int)bi)) {
-				const V3 localMin = imported ? lo : V3{ -.5f,-.5f,-.5f }, localMax = imported ? hi : V3{ .5f,.5f,.5f };
+				const V3 localMin = imported ? lo - (centerMeshOnFootprint ? meshCenter : V3{}) : V3{ -.5f,-.5f,-.5f };
+				const V3 localMax = imported ? hi - (centerMeshOnFootprint ? meshCenter : V3{}) : V3{ .5f,.5f,.5f };
 				const V3 corners[8] = { {localMin.x,localMin.y,localMin.z},{localMax.x,localMin.y,localMin.z},{localMax.x,localMax.y,localMin.z},{localMin.x,localMax.y,localMin.z},{localMin.x,localMin.y,localMax.z},{localMax.x,localMin.y,localMax.z},{localMax.x,localMax.y,localMax.z},{localMin.x,localMax.y,localMax.z} };
 				std::array<ImVec2, 8> outline{};
 				for (int i = 0; i < 8; i++) { float d; outline[i] = screen(world(corners[i]), d); }
 				selectedOutlines.emplace_back((int)bi, outline);
 				if ((int)bi == state.selection) { selectedCenter = center; hasSelectedOutline = true; }
 			}
-			auto append = [&](V3 aa, V3 bb, V3 cc, V3 na, V3 nb, V3 nc, std::array<float, 2> ta = {}, std::array<float, 2> tb = {}, std::array<float, 2> tc = {}) {V3 a = world(aa), q = world(bb), r = world(cc); const V3 transformed[3] = { norm(orient({na.x / sc[0],na.y / sc[1],na.z / sc[2]},b)),norm(orient({nb.x / sc[0],nb.y / sc[1],nb.z / sc[2]},b)),norm(orient({nc.x / sc[0],nc.y / sc[1],nc.z / sc[2]},b)) }; const V3 lightDir = norm(V3{ -.4f,.5f,.82f }); ImU32 colors[3]; for (int i = 0; i < 3; i++) { float light = .88f + .12f * std::max(0.f, dot(transformed[i], lightDir)); float shade = isSelected((int)bi) ? std::min(1.f, light * 1.04f) : light; colors[i] = IM_COL32((int)(red * shade * 255), (int)(green * shade * 255), (int)(blue * shade * 255), 255); }float da, db, dc; auto pa = screen(a, da), pb = screen(q, db), pc = screen(r, dc); triangles.push_back({ {pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},{ta,tb,tc},diffuseTexture,(int)bi }); };
+			auto append = [&](V3 aa, V3 bb, V3 cc, V3 na, V3 nb, V3 nc, std::array<float, 2> ta = {}, std::array<float, 2> tb = {}, std::array<float, 2> tc = {}, GLuint triangleTexture = UINT32_MAX) {V3 a = world(aa), q = world(bb), r = world(cc); const V3 transformed[3] = { norm(orient({na.x / sc[0],na.y / sc[1],na.z / sc[2]},b)),norm(orient({nb.x / sc[0],nb.y / sc[1],nb.z / sc[2]},b)),norm(orient({nc.x / sc[0],nc.y / sc[1],nc.z / sc[2]},b)) }; const V3 lightDir = norm(V3{ -.4f,.5f,.82f }); ImU32 colors[3]; for (int i = 0; i < 3; i++) { float light = .88f + .12f * std::max(0.f, dot(transformed[i], lightDir)); float shade = isSelected((int)bi) ? std::min(1.f, light * 1.04f) : light; colors[i] = IM_COL32((int)(red * shade * 255), (int)(green * shade * 255), (int)(blue * shade * 255), 255); }float da, db, dc; auto pa = screen(a, da), pb = screen(q, db), pc = screen(r, dc); triangles.push_back({ {pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},{ta,tb,tc},triangleTexture == UINT32_MAX ? diffuseTexture : triangleTexture,(int)bi }); };
 			if (imported) {
 				const size_t sourceTriangles = m->indices.size() / 3;
 				const size_t triangleStride = coarsePreview ? std::max<size_t>(1, (sourceTriangles + perPartTriangleBudget - 1) / perPartTriangleBudget) : 1;
-				for (size_t tri = 0; tri < sourceTriangles; tri += triangleStride) { size_t ti = tri * 3; const auto ia = m->indices[ti], ib = m->indices[ti + 1], ic = m->indices[ti + 2]; if (ia >= m->vertices.size() || ib >= m->vertices.size() || ic >= m->vertices.size())continue; const auto uvAt = [&](uint32_t i) {return i < m->uvs.size() ? m->uvs[i] : std::array<float, 2>{}; }; append(m->vertices[ia], m->vertices[ib], m->vertices[ic], m->normals[ia], m->normals[ib], m->normals[ic], uvAt(ia), uvAt(ib), uvAt(ic)); }
+				for (size_t tri = 0; tri < sourceTriangles; tri += triangleStride) { size_t ti = tri * 3; const auto ia = m->indices[ti], ib = m->indices[ti + 1], ic = m->indices[ti + 2]; if (ia >= m->vertices.size() || ib >= m->vertices.size() || ic >= m->vertices.size())continue; const auto uvAt = [&](uint32_t i) {return i < m->uvs.size() ? m->uvs[i] : std::array<float, 2>{}; }; GLuint triangleTexture = UINT32_MAX; if (catalogEntry != state.catalog.end() && tri < m->triangleMaterials.size()) { auto material = catalogEntry->second.materialTextures.find(m->triangleMaterials[tri]); if (material != catalogEntry->second.materialTextures.end())triangleTexture = diffuseTextureFor(material->second); } append(m->vertices[ia], m->vertices[ib], m->vertices[ic], m->normals[ia], m->normals[ib], m->normals[ic], uvAt(ia), uvAt(ib), uvAt(ic), triangleTexture); }
 			}
 			else {
 				V3 v[8] = { {-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f} };
@@ -1373,8 +1471,8 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				}
 			}
 			if (!hitAxis) {
-				if (ImGui::GetIO().KeyShift) { if (picked >= 0) { state.selection = picked; state.selectionSet.insert(picked); } }
-				else { state.selection = picked; state.selectionSet.clear(); if (picked >= 0)state.selectionSet.insert(picked); }
+				if (ImGui::GetIO().KeyShift) { if (picked >= 0) { state.selection = picked; addSelectionGroup(picked); } }
+				else { state.selection = picked; state.selectionSet.clear(); if (picked >= 0)addSelectionGroup(picked); }
 			}
 			state.dragSelection.clear();
 			if (hitAxis) {
