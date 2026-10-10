@@ -1077,6 +1077,25 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 										try { size_t n; unsigned long x = std::stoul(s, &n, 16); if (n != 6)return false; out = (int)x; return true; }
 										catch (...) { return false; }
 									}
+									std::string displayNameFromShapeSet(const std::string& source) {
+										std::string name = lower(source);
+										auto stripPrefix = [&](std::string_view prefix) { if (name.rfind(prefix, 0) == 0)name.erase(0, prefix.size()); };
+										stripPrefix("obj_"); stripPrefix("jnt_");
+										for (const std::string_view prefix : { "interactive_", "survivalobject_", "scrap_" })stripPrefix(prefix);
+										for (const std::string_view suffix : { "_creative", "_challenge", "_warehouse", "_scrap" })if (name.size() > suffix.size() && name.ends_with(suffix))name.resize(name.size() - suffix.size());
+										if (name.size() > 3 && name[name.size() - 3] == '_' && std::isdigit((unsigned char)name[name.size() - 2]) && std::isdigit((unsigned char)name[name.size() - 1]))name.resize(name.size() - 3);
+										static const std::pair<std::string_view, std::string_view> compounds[] = {
+											{ "driverseat", "Driver's Seat" }, { "driversaddle", "Driver's Saddle" },
+											{ "gasengine", "Gas Engine" }, { "electricengine", "Electric Engine" }
+										};
+										for (const auto& [key, title] : compounds)if (name == key)return std::string(title);
+										std::string title; bool capitalize = true;
+										for (unsigned char character : name) {
+											if (character == '_' || character == '-') { title.push_back(' '); capitalize = true; }
+											else { title.push_back(capitalize ? (char)std::toupper(character) : (char)character); capitalize = false; }
+										}
+										return title;
+									}
 									int displayColor(const Parser::Block& block) {
 										int color = 0x8c9bad;
 										if (block.hasColor && colorValue(block.color, color))return color;
@@ -1496,6 +1515,10 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			auto& b = blocks[state.selection];
 			const bool multiSelection = state.selectionSet.size() > 1;
 			std::string title = multiSelection ? "Multi-selection" : Parser::findBlockNameByShapeID(b.shapeID, items);
+			if (title.empty() && !multiSelection) {
+				const auto shape = state.catalog.find(lower(b.shapeID));
+				if (shape != state.catalog.end())title = displayNameFromShapeSet(shape->second.name);
+			}
 			if (title.empty())title = "Unknown part";
 			ImGui::TextWrapped("%s", title.c_str());
 			if (multiSelection)ImGui::TextDisabled("%zu parts selected · movement and color apply to all", state.selectionSet.size());
