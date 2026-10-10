@@ -51,6 +51,8 @@ namespace BlueprintViewport {
 			int selection = -1;
 			std::unordered_set<int> selectionSet;
 			std::vector<int> dragSelection;
+			// Keep the default camera on the same side of the creation as the game
+			// blueprint preview; the opposite yaw reflects asymmetric builds in top view.
 			float yaw = 0.72f, pitch = 0.42f, zoom = 1.f;
 			ImVec2 pan{ 0,0 };
 			int dragAxis = 0;
@@ -372,11 +374,10 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 								}
 								if (!entry.diffuseTexture.empty())break;
 							}
-							const bool suspensionPart = lower(entry.name).find("suspension") != std::string::npos;
-							// Try the highest-quality mesh first, then fall through to the
-							// shipped LOD meshes if an asset has a variant this importer cannot
-							// decode. Suspensions have an animated pose0 that exposes the spring;
-							// the static `mesh` is the retracted/off pose, so prefer pose0 there.
+							// Blueprint previews use the renderable's static mesh. pose0 is an
+							// animation pose asset, not a replacement for the complete static
+							// assembly (notably for suspension models). Keep it as a decoder
+							// fallback only when the corresponding mesh cannot be loaded.
 							for (const auto& lod : (*rend)["lodList"]) {
 								if (!lod.is_object())continue;
 								auto addModel = [&](const char* key) {
@@ -385,9 +386,8 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									if (model.empty() || !std::filesystem::is_regular_file(model))return;
 									if (std::find(entry.models.begin(), entry.models.end(), model) == entry.models.end())entry.models.push_back(std::move(model));
 								};
-								if (suspensionPart)addModel("pose0");
 								addModel("mesh");
-								if (!suspensionPart)addModel("pose0");
+								addModel("pose0");
 							}
 							if (entry.models.empty())continue;
 							if (!entry.diffuseTexture.empty())state.shapeDiffuseTextures[id] = entry.diffuseTexture;
@@ -1000,7 +1000,11 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 										// Scrap Mechanic blueprint coordinates are Z-up: X/Y lie on the ground.
 										float xx = c.cy * v.x - c.sy * v.y, horizontalDepth = c.sy * v.x + c.cy * v.y;
 										float yy = c.cp * v.z - c.sp * horizontalDepth; depth = c.sp * v.z + c.cp * horizontalDepth;
-										return { c.center.x + c.scale * xx,c.center.y - c.scale * yy };
+										// Game blueprints present increasing X toward screen-left in the
+										// canonical view. Reflect the camera's horizontal screen axis here,
+										// so geometry, grid, picking, and drag handles share that convention
+										// without altering stored positions or part orientation.
+										return { c.center.x - c.scale * xx,c.center.y - c.scale * yy };
 									}
 									bool colorValue(std::string s, int& out) {
 										if (!s.empty() && s[0] == '#')s.erase(0, 1); if (s.size() != 6)return false;
