@@ -54,6 +54,7 @@ struct ModelLoadReport {
 ModelLoadReport inspectModelFile(const std::filesystem::path& path);
 ModelLoadReport inspectShape(const std::string& shapeId);
 void resetSelection();
+void notify(const std::string& message);
 void shutdownRenderer();
 void render(json& blueprint, const std::filesystem::path& blueprintPath,
 	std::vector<Parser::Block>& blocks, const json& items,

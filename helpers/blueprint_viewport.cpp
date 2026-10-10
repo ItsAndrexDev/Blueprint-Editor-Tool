@@ -44,6 +44,11 @@ namespace BlueprintViewport {
 			std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;
 			std::unordered_map<std::wstring, std::shared_ptr<Mesh>> meshFiles;
 			std::unordered_map<std::wstring, GLuint> textures;
+			std::vector<json> blueprintHistory;
+			size_t historyCursor{};
+			bool historyActionInProgress{};
+			std::string notification;
+			double notificationUntil{};
 			size_t meshCacheBytes{};
 			size_t textureCacheBytes{};
 			std::filesystem::path game;
@@ -1149,13 +1154,21 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		state.selectionSet.clear();
 		state.dragSelection.clear();
 		state.dragAxis = 0;
+		state.blueprintHistory.clear();
+		state.historyCursor = 0;
+		state.historyActionInProgress = false;
+	}
+
+	void notify(const std::string& message) {
+		state.notification = message;
+		state.notificationUntil = ImGui::GetTime() + 2.4;
 	}
 
 	void render(json& blueprint, const std::filesystem::path& blueprintPath,
 		std::vector<Parser::Block>& blocks, const json& items,
 		const std::string& blueprintName, bool& backToSelectionRequested) {
 		loadCatalog();
-		if (state.currentBlueprint != blueprintPath) { state.meshes.clear(); state.meshFiles.clear(); state.meshCacheBytes = 0; state.currentBlueprint = blueprintPath; state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0; state.pan = { 0,0 }; state.zoom = 1.f; }
+		if (state.currentBlueprint != blueprintPath) { state.meshes.clear(); state.meshFiles.clear(); state.meshCacheBytes = 0; state.currentBlueprint = blueprintPath; state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0; state.pan = { 0,0 }; state.zoom = 1.f; state.blueprintHistory.clear(); state.blueprintHistory.push_back(blueprint); Parser::applyBlockListToNode(blocks, state.blueprintHistory.back()); state.historyCursor = 0; state.historyActionInProgress = false; }
 		for (auto it = state.selectionSet.begin(); it != state.selectionSet.end();)if (*it < 0 || *it >= (int)blocks.size())it = state.selectionSet.erase(it); else ++it;
 		if (state.selection < 0 || state.selection >= (int)blocks.size())state.selection = -1;
 		if (state.selection >= 0)state.selectionSet.insert(state.selection);
@@ -1237,7 +1250,18 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			}
 			};
 		ImGui::Begin("Blueprint Editor");
-		auto saveBlueprint = [&]() {Parser::applyBlockListToNode(blocks, blueprint); if (Parser::saveBlueprint(blueprintPath.string(), blueprint))state.error.clear(); else state.error = "Could not save blueprint. Check file permissions."; };
+		auto saveBlueprint = [&]() {Parser::applyBlockListToNode(blocks, blueprint); if (Parser::saveBlueprint(blueprintPath.string(), blueprint)) { state.error.clear(); notify("Blueprint saved"); } else state.error = "Could not save blueprint. Check file permissions."; };
+		auto restoreHistory = [&](size_t cursor) {
+			if (cursor >= state.blueprintHistory.size())return;
+			state.historyCursor = cursor;
+			blueprint = state.blueprintHistory[cursor];
+			blocks = Parser::parseBlueprint(blueprint);
+			state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0;
+			state.historyActionInProgress = false;
+			state.error.clear();
+		};
+		auto undo = [&]() { if (state.historyCursor > 0) { restoreHistory(state.historyCursor - 1); notify("Edit undone"); } };
+		auto redo = [&]() { if (state.historyCursor + 1 < state.blueprintHistory.size()) { restoreHistory(state.historyCursor + 1); notify("Edit redone"); } };
 		auto removeSelection = [&]() {
 			std::vector<std::pair<int, int>> children;
 			std::vector<int> joints;
@@ -1257,14 +1281,18 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			};
 		const ImGuiIO& io = ImGui::GetIO();
 		const bool shortcutReady = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-		if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))saveBlueprint();
+		if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))undo();
+		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false))redo();
+		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))saveBlueprint();
 		if (shortcutReady && ImGui::IsKeyPressed(ImGuiKey_Delete, false))removeSelection();
 		ImGui::TextWrapped("Editing: %s", blueprintName.c_str());
 		if (ImGui::Button("Back to Selection"))backToSelectionRequested = true;
 		ImGui::Spacing();
 		ImGui::Text("3D blueprint editor"); ImGui::SameLine(); ImGui::TextDisabled("%zu parts  |  %zu grid cells", blocks.size(), gridCellCount(blocks));
 		ImGui::SameLine(); if (ImGui::Button("Save Blueprint"))saveBlueprint();
-		ImGui::SameLine(); if (ImGui::Button("Reset view")) { state.yaw = .72f; state.pitch = .42f; state.zoom = 1.f; state.pan = { 0,0 }; }
+		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor == 0); if (ImGui::Button("Undo"))undo(); ImGui::EndDisabled();
+		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor + 1 >= state.blueprintHistory.size()); if (ImGui::Button("Redo"))redo(); ImGui::EndDisabled();
+		ImGui::SameLine(); if (ImGui::Button("Reset view")) { state.yaw = .72f; state.pitch = .42f; state.zoom = 1.f; state.pan = { 0,0 }; notify("View reset"); }
 		float avail = ImGui::GetContentRegionAvail().x; float inspector = std::clamp(avail * .25f, 230.f, 330.f);
 		ImGui::BeginChild("BlueprintViewport", ImVec2(std::max(120.f, avail - inspector - 8), 0), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		ImVec2 origin = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail(); size.x = std::max(size.x, 120.f); size.y = std::max(size.y, 120.f);
@@ -1627,6 +1655,32 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
 		ImGui::TextWrapped("Shift-click adds to selection. Drag an axis arrow to move selected parts along it. Right-drag to orbit, middle-drag to pan, and scroll to zoom.");
 		ImGui::PopStyleColor();
+		json frameSnapshot = blueprint;
+		Parser::applyBlockListToNode(blocks, frameSnapshot);
+		if (state.blueprintHistory.empty()) { state.blueprintHistory.push_back(frameSnapshot); state.historyCursor = 0; }
+		else if (frameSnapshot != state.blueprintHistory[state.historyCursor]) {
+			const bool interactionActive = ImGui::GetIO().MouseDown[0] || ImGui::IsAnyItemActive();
+			if (state.historyActionInProgress && interactionActive)state.blueprintHistory[state.historyCursor] = std::move(frameSnapshot);
+			else {
+				state.blueprintHistory.erase(state.blueprintHistory.begin() + (ptrdiff_t)state.historyCursor + 1, state.blueprintHistory.end());
+				state.blueprintHistory.push_back(std::move(frameSnapshot));
+				state.historyCursor = state.blueprintHistory.size() - 1;
+				constexpr size_t maximumHistoryStates = 64;
+				if (state.blueprintHistory.size() > maximumHistoryStates) { state.blueprintHistory.erase(state.blueprintHistory.begin()); --state.historyCursor; }
+			}
+			state.historyActionInProgress = interactionActive;
+		}
+		else if (!ImGui::GetIO().MouseDown[0] && !ImGui::IsAnyItemActive())state.historyActionInProgress = false;
+		if (!state.notification.empty() && ImGui::GetTime() < state.notificationUntil) {
+			const ImVec2 textSize = ImGui::CalcTextSize(state.notification.c_str());
+			const ImVec2 padding(12.f, 8.f);
+			const ImVec2 toastSize(textSize.x + padding.x * 2.f, textSize.y + padding.y * 2.f);
+			const ImVec2 toastPos(origin.x + size.x - toastSize.x - 12.f, origin.y + 12.f);
+			auto* foreground = ImGui::GetForegroundDrawList();
+			foreground->AddRectFilled(toastPos, ImVec2(toastPos.x + toastSize.x, toastPos.y + toastSize.y), IM_COL32(37, 91, 66, 242), 5.f);
+			foreground->AddText(ImVec2(toastPos.x + padding.x, toastPos.y + padding.y), IM_COL32(238, 250, 240, 255), state.notification.c_str());
+		}
+		else if (ImGui::GetTime() >= state.notificationUntil)state.notification.clear();
 		ImGui::EndChild(); ImGui::End();
 	}
 }

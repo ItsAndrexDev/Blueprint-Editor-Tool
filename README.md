@@ -22,6 +22,8 @@ The recent Scrap Mechanic update broke older external blueprint editors. This pr
 4. Select parts in the viewport and edit them with the Inspector or the viewport controls.
 5. Press **Save Blueprint** or **Ctrl+S** to write your changes to the blueprint.
 
+Use **Undo** or **Ctrl+Z** to undo an edit, and **Redo** or **Ctrl+Y** to restore it. Undo history stays with the open blueprint in the editor; save to write the current state to disk.
+
 The editor saves directly to the selected blueprint folder. Make a backup of important blueprints before editing.
 
 ## Selection and movement
@@ -51,6 +53,8 @@ Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable 
 | Zoom the camera | Mouse wheel |
 | Return to the default camera view | **Reset view** |
 | Save the blueprint | **Ctrl+S** or **Save Blueprint** |
+| Undo the last edit | **Ctrl+Z** or **Undo** |
+| Redo an undone edit | **Ctrl+Y** or **Redo** |
 
 ## Blueprint compatibility
 

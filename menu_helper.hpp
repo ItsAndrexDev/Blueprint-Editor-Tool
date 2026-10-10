@@ -65,6 +65,7 @@ void renderBlueprintLoader(std::vector<BlueprintItem>& loadedPrints,
 					blocks = std::move(candidateBlocks);
 					itemSelected = item;
 					BlueprintViewport::resetSelection();
+					BlueprintViewport::notify("Blueprint loaded: " + item.name);
 					status = BLUEPRINT_EDIT;
 					std::cout << "Selected Blueprint: " << item.name << std::endl;
 				}
@@ -115,6 +116,7 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("Position fields, movement buttons, and axis arrows move the whole selection. Rotation edits the active part. Color changes apply to every selected part.");
 	ImGui::BulletText("With one part selected, Dimensions lets you resize built-in blocks. With multiple parts selected, it shows their combined world-space Width (X), Depth (Y), and Height (Z).");
 	ImGui::BulletText("Press Delete to remove all selected parts.");
+	ImGui::BulletText("Use Undo or Ctrl+Z to undo an edit, and Redo or Ctrl+Y to restore it. Undo history is kept in the editor until you switch blueprints; save to write the current state to disk.");
 	ImGui::Spacing();
 	ImGui::Text("Camera and part appearance");
 	ImGui::BulletText("Right-drag to orbit the camera, middle-drag to pan, and scroll to zoom. Reset view returns to the default camera.");
@@ -124,6 +126,7 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::Text("Shortcuts");
 	ImGui::BulletText("Shift + click: add a part to the current selection.");
 	ImGui::BulletText("Ctrl + S: save the edited blueprint.");
+	ImGui::BulletText("Ctrl + Z: undo the last edit. Ctrl + Y: redo an undone edit.");
 	ImGui::BulletText("Delete: remove the selected part or parts.");
 	ImGui::BulletText("Right mouse + drag: orbit. Middle mouse + drag: pan. Mouse wheel: zoom.");
 	ImGui::Spacing();
