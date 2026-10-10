@@ -1,7 +1,9 @@
 #define NOMINMAX
+#define GLFW_EXPOSE_NATIVE_WIN32
 #include <Windows.h>
 #undef RGB
 #include "gui_manager.hpp"
+#include <GLFW/glfw3native.h>
 #include "helpers/blueprint_viewport.hpp"
 #include "helpers/scrap_parser.hpp"
 #include "menu_helper.hpp"
@@ -116,6 +118,9 @@ void openDiagnosticConsole() {
 }
 
 int main(int argc, char** argv) {
+
+
+
 	if (argc == 3 && std::string(argv[1]) == "--inspect-model") {
 		openDiagnosticConsole();
 		const auto report = BlueprintViewport::inspectModelFile(std::filesystem::path(argv[2]));
@@ -138,6 +143,15 @@ int main(int argc, char** argv) {
 	if (!gui.isReady()) {
 		std::cerr << "Failed to initialize the OpenGL 3.3 editor window. Update your graphics driver or check that a compatible GPU is available." << std::endl;
 		return 1;
+	}
+	HWND hwnd = glfwGetWin32Window(gui.window);
+	if (hwnd) {
+		HINSTANCE hInstance = GetModuleHandle(NULL);
+		HICON hIconBig = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+		HICON hIconSmall = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+
+		if (hIconBig) SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+		if (hIconSmall) SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSmall);
 	}
 	loadEmbeddedItems(items);
 	// Load blueprint folders and read names + icons

@@ -143,6 +143,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="gui_manager.cpp" />
+    <ClCompile Include="helpers\AptosFont.hpp" />
     <ClCompile Include="helpers\blueprint_viewport.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_demo.cpp" />

@@ -1,5 +1,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "gui_manager.hpp"
+#include "helpers/AptosFont.hpp"
 #include "helpers/stb_image.h"
 #include "imgui/imgui_internal.h"
 #include <chrono>
@@ -9,14 +10,14 @@
 #include <thread>
 
 namespace {
-bool hasLegacyBlueprintWindow(const char* iniFilename) {
-	if (!iniFilename || !*iniFilename) return false;
-	std::ifstream settings(iniFilename);
-	std::string line;
-	while (std::getline(settings, line))
-		if (line == "[Window][Blueprint]") return true;
-	return false;
-}
+	bool hasLegacyBlueprintWindow(const char* iniFilename) {
+		if (!iniFilename || !*iniFilename) return false;
+		std::ifstream settings(iniFilename);
+		std::string line;
+		while (std::getline(settings, line))
+			if (line == "[Window][Blueprint]") return true;
+		return false;
+	}
 }
 
 GuiManager::Gui::Gui(int width, int height, const char* title) {
@@ -58,6 +59,15 @@ GuiManager::Gui::Gui(int width, int height, const char* title) {
 	defaultDockLayoutPending = !hasSavedLayout || hasLegacyBlueprintWindow(io->IniFilename);
 	io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // Allow docking
 	io->ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
+	ImFont* aptosFont = io->Fonts->AddFontFromMemoryCompressedTTF(
+		AptosFont_compressed_data,
+		AptosFont_compressed_size,
+		18.0f
+	);
+
+	IM_ASSERT(aptosFont != nullptr);
+
 
 	ImGui::StyleColorsDark();
 

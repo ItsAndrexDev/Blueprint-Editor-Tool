@@ -128,5 +128,12 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("Right mouse + drag: orbit. Middle mouse + drag: pan. Mouse wheel: zoom.");
 	ImGui::Spacing();
 	ImGui::TextWrapped("If the editor reports a Survival-only part, Scrap Mechanic Creative mode cannot spawn that part. Remove it or use a Survival world.");
+	ImGui::Spacing();
+	ImGui::Spacing();
+	ImGui::TextWrapped("Developed By Andrex. This editor is open-source and available on GitHub");
+	ImGui::TextWrapped("If you discover a bug or have a feature request, please do so on discord @consthater");
+	ImGui::Spacing();
+	ImGui::Spacing();
+	ImGui::TextWrapped("This editor is not affiliated with Axolot Games or Scrap Mechanic. It is a fan-made tool for editing blueprints.");
 	ImGui::End();
 }
