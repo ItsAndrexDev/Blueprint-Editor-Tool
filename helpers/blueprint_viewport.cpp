@@ -3,6 +3,7 @@
 #include <glad/glad.h>
 #include "blueprint_viewport.hpp"
 #include "fbx_inflate.hpp"
+#include "stb_image.h"
 #include "../imgui/imgui.h"
 #include <algorithm>
 #include <array>
@@ -31,16 +32,20 @@ namespace BlueprintViewport {
 		V3 cross(V3 a, V3 b) { return { a.y * b.z - a.z * b.y,a.z * b.x - a.x * b.z,a.x * b.y - a.y * b.x }; }
 		V3 norm(V3 a) { float n = std::sqrt(dot(a, a)); return n > 1e-7f ? a * (1.f / n) : V3{ 0,1,0 }; }
 
-		struct Mesh { std::vector<V3> vertices; std::vector<V3> normals; std::vector<uint32_t> indices; V3 boundsMin{}, boundsMax{}; bool hasBounds{}; bool loaded{}; std::string detail; };
-		struct Entry { std::vector<std::filesystem::path> models; std::string name; };
+		struct Mesh { std::vector<V3> vertices; std::vector<V3> normals; std::vector<std::array<float, 2>> uvs; std::vector<uint32_t> indices; V3 boundsMin{}, boundsMax{}; bool hasBounds{}; bool loaded{}; std::string detail; };
+		struct Entry { std::vector<std::filesystem::path> models; std::filesystem::path diffuseTexture; std::string name; };
 		struct State {
 			std::unordered_map<std::string, Entry> catalog;
 			std::unordered_set<std::string> blockShapes;
+			std::unordered_set<std::string> footprintAnchoredParts;
 			std::unordered_map<std::string, V3> shapeSizes;
 			std::unordered_map<std::string, std::string> blockColors;
+			std::unordered_map<std::string, std::filesystem::path> shapeDiffuseTextures;
 			std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;
 			std::unordered_map<std::wstring, std::shared_ptr<Mesh>> meshFiles;
+			std::unordered_map<std::wstring, GLuint> textures;
 			size_t meshCacheBytes{};
+			size_t textureCacheBytes{};
 			std::filesystem::path game;
 			std::filesystem::path currentBlueprint;
 			int selection = -1;
@@ -67,7 +72,8 @@ namespace BlueprintViewport {
 			std::string renderError;
 		} state;
 
-		struct SceneVertex { float x, y, z, r, g, b; };
+		struct SceneVertex { float x, y, z, r, g, b, u, v; };
+		struct SceneBatch { GLuint texture{}; std::vector<SceneVertex> vertices; };
 
 		struct GlStateSnapshot {
 			GLint drawFramebuffer{}, readFramebuffer{}, viewport[4]{}, program{}, vertexArray{}, arrayBuffer{}, renderbuffer{};
@@ -131,13 +137,18 @@ namespace BlueprintViewport {
 			static constexpr char vertexSource[] = R"GLSL(#version 330 core
 layout(location=0) in vec3 aPosition;
 layout(location=1) in vec3 aColor;
+layout(location=2) in vec2 aUv;
 out vec3 vColor;
-void main(){gl_Position=vec4(aPosition,1.0);vColor=aColor;}
+out vec2 vUv;
+void main(){gl_Position=vec4(aPosition,1.0);vColor=aColor;vUv=aUv;}
 )GLSL";
 			static constexpr char fragmentSource[] = R"GLSL(#version 330 core
 in vec3 vColor;
+in vec2 vUv;
+uniform sampler2D uDiffuse;
+uniform bool uTextured;
 out vec4 outColor;
-void main(){outColor=vec4(vColor,1.0);}
+void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(vColor*texel.rgb,1.0);}
 )GLSL";
 			std::string error;
 			GLuint vertex = compileSceneShader(GL_VERTEX_SHADER, vertexSource, error);
@@ -152,6 +163,7 @@ void main(){outColor=vec4(vColor,1.0);}
 			GLuint vao = 0, vbo = 0; glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo); glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
 			glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(SceneVertex), (void*)offsetof(SceneVertex, x));
 			glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(SceneVertex), (void*)offsetof(SceneVertex, r));
+			glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(SceneVertex), (void*)offsetof(SceneVertex, u));
 			glBindVertexArray((GLuint)oldVao); glBindBuffer(GL_ARRAY_BUFFER, (GLuint)oldBuffer);
 			if (!vao || !vbo) { if (vao)glDeleteVertexArrays(1, &vao); if (vbo)glDeleteBuffers(1, &vbo); glDeleteProgram(program); state.renderError = "Could not allocate GPU buffers for the blueprint viewer."; return false; }
 			state.sceneProgram = program; state.sceneVao = vao; state.sceneVbo = vbo; state.renderError.clear();
@@ -184,8 +196,8 @@ void main(){outColor=vec4(vColor,1.0);}
 			state.sceneTargetWidth = width; state.sceneTargetHeight = height; state.renderError.clear(); return true;
 		}
 
-		bool drawDepthBufferedScene(const std::vector<SceneVertex>& vertices, ImVec2 origin, ImVec2 size, ImDrawList* drawList) {
-			if (vertices.empty())return false;
+		bool drawDepthBufferedScene(const std::vector<SceneBatch>& batches, ImVec2 origin, ImVec2 size, ImDrawList* drawList) {
+			if (batches.empty())return false;
 			while (glGetError() != GL_NO_ERROR) {}
 			const ImVec2 framebufferScale = ImGui::GetIO().DisplayFramebufferScale;
 			const int width = std::max(1, (int)std::ceil(size.x * std::max(.25f, framebufferScale.x)));
@@ -198,8 +210,15 @@ void main(){outColor=vec4(vColor,1.0);}
 				glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LESS); glDepthMask(GL_TRUE); glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 				glClearColor(0.f, 0.f, 0.f, 0.f); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 				glUseProgram(state.sceneProgram); glBindVertexArray(state.sceneVao); glBindBuffer(GL_ARRAY_BUFFER, state.sceneVbo);
-				glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(vertices.size() * sizeof(SceneVertex)), vertices.data(), GL_STREAM_DRAW);
-				glDrawArrays(GL_TRIANGLES, 0, (GLsizei)vertices.size());
+				glActiveTexture(GL_TEXTURE0);
+				glUniform1i(glGetUniformLocation(state.sceneProgram, "uDiffuse"), 0);
+				for (const auto& batch : batches) {
+					if (batch.vertices.empty())continue;
+					glUniform1i(glGetUniformLocation(state.sceneProgram, "uTextured"), batch.texture ? GL_TRUE : GL_FALSE);
+					glBindTexture(GL_TEXTURE_2D, batch.texture);
+					glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(batch.vertices.size() * sizeof(SceneVertex)), batch.vertices.data(), GL_STREAM_DRAW);
+					glDrawArrays(GL_TRIANGLES, 0, (GLsizei)batch.vertices.size());
+				}
 				GLenum drawError = GL_NO_ERROR;
 				while (glGetError() != GL_NO_ERROR)drawError = GL_INVALID_OPERATION;
 				success = drawError == GL_NO_ERROR;
@@ -216,10 +235,11 @@ void main(){outColor=vec4(vColor,1.0);}
 		V3 orient(V3 v, const Parser::Block& b);
 		void buildNormals(Mesh& mesh);
 		V3 shapeSize(const Parser::Block& b);
+		std::string lower(std::string s);
 		V3 blockCenter(const Parser::Block& b) {
 			const V3 size = shapeSize(b);
-			const V3 local{ (size.x - 1.f) * .5f,(size.y - 1.f) * .5f,(size.z - 1.f) * .5f };
-			return V3{ (float)b.pos.x,(float)b.pos.y,(float)b.pos.z } + orient(local, b);
+			const auto placement = placementTransform(b, { size.x, size.y, size.z });
+			return { placement.translation.x, placement.translation.y, placement.translation.z };
 		}
 
 		std::string lower(std::string s) { std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {return (char)std::tolower(c); }); return s; }
@@ -301,6 +321,7 @@ void main(){outColor=vec4(vColor,1.0);}
 							if (part.contains("box") && part["box"].is_object())footprint = &part["box"];
 							else if (part.contains("hull") && part["hull"].is_object())footprint = &part["hull"];
 							if (footprint) {
+								state.footprintAnchoredParts.insert(id);
 								auto readSize = [&](const char* axis) {
 									if (!footprint->contains(axis) || !(*footprint)[axis].is_number())return 1.f;
 									return std::clamp((*footprint)[axis].get<float>(), 1.f, 256.f);
@@ -334,6 +355,23 @@ void main(){outColor=vec4(vColor,1.0);}
 							if (!rend->is_object() || !rend->contains("lodList") || !(*rend)["lodList"].is_array() || (*rend)["lodList"].empty())continue;
 							Entry entry;
 							if (part.contains("name") && part["name"].is_string())entry.name = part["name"].get<std::string>();
+							// Renderables describe diffuse images in either subMeshMap (newer
+							// interactive assets) or subMeshList (vehicle and legacy assets).
+							for (const auto& lod : (*rend)["lodList"]) {
+								if (!lod.is_object())continue;
+								auto readDiffuse = [&](const json& material) {
+									std::string texture;
+									if (material.is_object() && material.contains("textures") && material["textures"].is_object() && material["textures"].contains("diffuse") && material["textures"]["diffuse"].is_string())texture = material["textures"]["diffuse"].get<std::string>();
+									else if (material.is_object() && material.contains("textureList") && material["textureList"].is_array() && !material["textureList"].empty() && material["textureList"][0].is_string())texture = material["textureList"][0].get<std::string>();
+									if (!texture.empty())entry.diffuseTexture = resolveGameAsset(texture);
+								};
+								if (lod.contains("subMeshList") && lod["subMeshList"].is_array())for (const auto& material : lod["subMeshList"]) { readDiffuse(material); if (!entry.diffuseTexture.empty())break; }
+								if (entry.diffuseTexture.empty() && lod.contains("subMeshMap") && lod["subMeshMap"].is_object())for (auto it = lod["subMeshMap"].begin(); it != lod["subMeshMap"].end(); ++it) {
+									readDiffuse(it.value());
+									if (!entry.diffuseTexture.empty())break;
+								}
+								if (!entry.diffuseTexture.empty())break;
+							}
 							const bool suspensionPart = lower(entry.name).find("suspension") != std::string::npos;
 							// Try the highest-quality mesh first, then fall through to the
 							// shipped LOD meshes if an asset has a variant this importer cannot
@@ -352,6 +390,7 @@ void main(){outColor=vec4(vColor,1.0);}
 								if (!suspensionPart)addModel("pose0");
 							}
 							if (entry.models.empty())continue;
+							if (!entry.diffuseTexture.empty())state.shapeDiffuseTextures[id] = entry.diffuseTexture;
 							state.catalog[id] = std::move(entry);
 						}
 					}
@@ -490,25 +529,46 @@ void main(){outColor=vec4(vColor,1.0);}
 			const FProp* verts = nullptr; const FProp* faces = nullptr;
 			for (const auto& c : node.children) { if (c.name == "Vertices" && !c.props.empty())verts = &c.props[0]; if (c.name == "PolygonVertexIndex" && !c.props.empty())faces = &c.props[0]; }
 			if (!verts || !faces || verts->arr.size() < 9 || faces->arr.size() < 3 || verts->arr.size() % 3)return false;
+			const FProp* uvValues = nullptr; const FProp* uvIndices = nullptr;
+			std::string uvMapping, uvReference;
+			if (const FNode* layer = childNamed(node, "LayerElementUV"))for (const auto& c : layer->children) {
+				if (c.name == "UV" && !c.props.empty())uvValues = &c.props[0];
+				else if (c.name == "UVIndex" && !c.props.empty())uvIndices = &c.props[0];
+				else if (c.name == "MappingInformationType" && !c.props.empty())uvMapping = c.props[0].text;
+				else if (c.name == "ReferenceInformationType" && !c.props.empty())uvReference = c.props[0].text;
+			}
 			const FbxTransform geometric = transformFromProperties(node, "GeometricTranslation", "GeometricRotation", "GeometricScaling");
-			const uint32_t base = (uint32_t)mesh.vertices.size();
-			for (size_t i = 0; i + 2 < verts->arr.size(); i += 3) {
-				V3 point{ (float)verts->arr[i],(float)verts->arr[i + 1],(float)verts->arr[i + 2] };
+			auto transformedPoint = [&](uint32_t index) {
+				V3 point{ (float)verts->arr[index * 3],(float)verts->arr[index * 3 + 1],(float)verts->arr[index * 3 + 2] };
 				point = applyFbxTransform(point, geometric);
 				for (const auto& transform : modelChain)point = applyFbxTransform(point, transform);
-				// Keep vertices in the mesh's Scrap Mechanic part-local basis. The
-				// blueprint xaxis/zaxis pair maps that basis into the Z-up creation
-				// frame; converting FBX Y-up data here applies a second rotation and
-				// turns PropY assets sideways in the viewer.
-				mesh.vertices.push_back(point);
-			}
-			std::vector<uint32_t> poly;
+				return point;
+			};
+			auto uvFor = [&](size_t polygonVertex, uint32_t vertexIndex) {
+				std::array<float, 2> uv{};
+				if (!uvValues || uvValues->arr.size() < 2)return uv;
+				int64_t direct = -1;
+				if (uvReference == "IndexToDirect" && uvIndices && polygonVertex < uvIndices->arr.size())direct = (int64_t)uvIndices->arr[polygonVertex];
+				else direct = uvMapping == "ByVertice" || uvMapping == "ByVertex" ? vertexIndex : (int64_t)polygonVertex;
+				if (direct >= 0 && (size_t)direct * 2 + 1 < uvValues->arr.size()) {
+					uv[0] = (float)uvValues->arr[(size_t)direct * 2];
+					uv[1] = 1.f - (float)uvValues->arr[(size_t)direct * 2 + 1];
+				}
+				return uv;
+			};
+			std::vector<std::pair<uint32_t, std::array<float, 2>>> poly;
+			size_t polygonVertex = 0;
 			for (double d : faces->arr) {
 				const int64_t raw = (int64_t)d; const bool end = raw < 0;
 				const uint64_t ix = (uint64_t)(end ? -raw - 1 : raw);
-				if (ix >= verts->arr.size() / 3) { poly.clear(); continue; }
-				poly.push_back((uint32_t)ix);
-				if (end) { for (size_t k = 1; k + 1 < poly.size(); k++) { mesh.indices.push_back(base + poly[0]); mesh.indices.push_back(base + poly[k]); mesh.indices.push_back(base + poly[k + 1]); }poly.clear(); }
+				if (ix >= verts->arr.size() / 3) { poly.clear(); ++polygonVertex; continue; }
+				poly.emplace_back((uint32_t)ix, uvFor(polygonVertex++, (uint32_t)ix));
+				if (end) {
+					std::vector<uint32_t> polygonIndices; polygonIndices.reserve(poly.size());
+					for (const auto& [vertexIndex, uv] : poly) { polygonIndices.push_back((uint32_t)mesh.vertices.size()); mesh.vertices.push_back(transformedPoint(vertexIndex)); mesh.uvs.push_back(uv); }
+					for (size_t k = 1; k + 1 < polygonIndices.size(); k++) { mesh.indices.push_back(polygonIndices[0]); mesh.indices.push_back(polygonIndices[k]); mesh.indices.push_back(polygonIndices[k + 1]); }
+					poly.clear();
+				}
 			}
 			return true;
 		}
@@ -817,6 +877,37 @@ void main(){outColor=vec4(vColor,1.0);}
 			else mesh->detail = "Shape UUID was not found in the installed shape sets";
 			state.meshes.emplace(id, mesh); return mesh;
 		}
+		GLuint diffuseTextureFor(const std::filesystem::path& diffuseTexture) {
+			if (diffuseTexture.empty())return 0;
+			const auto key = diffuseTexture.lexically_normal().native();
+			auto found = state.textures.find(key);
+			if (found != state.textures.end())return found->second;
+			int width = 0, height = 0, channels = 0;
+			GLuint texture = 0;
+			if (stbi_info(diffuseTexture.string().c_str(), &width, &height, &channels) && width > 0 && height > 0 && width <= 8192 && height <= 8192 && (uint64_t)width * (uint64_t)height <= 32ull * 1024ull * 1024ull && (size_t)width * (size_t)height * 4 <= 256ull * 1024ull * 1024ull - state.textureCacheBytes) {
+				unsigned char* pixels = stbi_load(diffuseTexture.string().c_str(), &width, &height, &channels, 4);
+				if (pixels) {
+					const GlStateSnapshot saved = captureGlState();
+					GLint unpackAlignment = 4; glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlignment);
+					while (glGetError() != GL_NO_ERROR) {}
+					glGenTextures(1, &texture); glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+					glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+					glGenerateMipmap(GL_TEXTURE_2D);
+					stbi_image_free(pixels);
+					const GLenum uploadError = glGetError();
+					glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment);
+					restoreGlState(saved);
+					if (uploadError != GL_NO_ERROR) { if (texture)glDeleteTextures(1, &texture); texture = 0; }
+					else state.textureCacheBytes += (size_t)width * (size_t)height * 4;
+				}
+			}
+			state.textures.emplace(key, texture);
+			return texture;
+		}
 
 V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }; case 2:return { 0,1,0 }; case -2:return { 0,-1,0 }; case 3:return { 0,0,1 }; case -3:return { 0,0,-1 }; default:return { 1,0,0 }; } }
 									V3 orient(V3 v, const Parser::Block& b) {
@@ -950,6 +1041,9 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 	}
 
 	void shutdownRenderer() {
+		for (const auto& [path, texture] : state.textures)if (texture)glDeleteTextures(1, &texture);
+		state.textures.clear();
+		state.textureCacheBytes = 0;
 		if (state.sceneDepthBuffer)glDeleteRenderbuffers(1, &state.sceneDepthBuffer);
 		if (state.sceneFramebuffer)glDeleteFramebuffers(1, &state.sceneFramebuffer);
 		if (state.sceneColorTexture)glDeleteTextures(1, &state.sceneColorTexture);
@@ -977,9 +1071,29 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		if (state.selection < 0 || state.selection >= (int)blocks.size())state.selection = -1;
 		if (state.selection >= 0)state.selectionSet.insert(state.selection);
 		auto isSelected = [&](int index) {return index == state.selection || state.selectionSet.contains(index); };
+		auto synchronizeJointPositions = [&]() {
+			Parser::applyBlockListToNode(blocks, blueprint);
+			if (!blueprint.contains("joints") || !blueprint["joints"].is_array()) return;
+			auto readPosition = [](const json& value) {
+				auto component = [&](const char* key) {
+					if (!value.is_object() || !value.contains(key) || !value[key].is_number_integer()) return 0;
+					try { return value[key].get<int>(); } catch (...) { return 0; }
+				};
+				return Parser::Position{ component("x"), component("y"), component("z") };
+			};
+			for (auto& block : blocks) {
+				if (!block.isJoint || block.jointIndex < 0 || block.jointIndex >= (int)blueprint["joints"].size()) continue;
+				const auto& joint = blueprint["joints"][block.jointIndex];
+				if (!joint.is_object() || !joint.contains("posA") || !joint.contains("posB")) continue;
+				block.jointPosA = readPosition(joint["posA"]);
+				block.jointPosB = readPosition(joint["posB"]);
+				block.pos = block.jointPosA;
+			}
+		};
 		auto moveSelection = [&](int x, int y, int z) {
 			if (state.selectionSet.empty() && state.selection >= 0)state.selectionSet.insert(state.selection);
-			for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size())nudge(blocks[index], x, y, z);
+			for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], x, y, z);
+			synchronizeJointPositions();
 			};
 		auto selectedWorldSize = [&]() {
 			const float infinity = std::numeric_limits<float>::infinity();
@@ -1013,11 +1127,17 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		auto saveBlueprint = [&]() {Parser::applyBlockListToNode(blocks, blueprint); if (Parser::saveBlueprint(blueprintPath.string(), blueprint))state.error.clear(); else state.error = "Could not save blueprint. Check file permissions."; };
 		auto removeSelection = [&]() {
 			std::vector<std::pair<int, int>> children;
-			for (size_t i = 0; i < blocks.size(); ++i)if (isSelected((int)i))children.emplace_back(blocks[i].bodyIndex, blocks[i].childIndex);
-			if (children.empty())return false;
+			std::vector<int> joints;
+			for (size_t i = 0; i < blocks.size(); ++i)if (isSelected((int)i)) {
+				if (blocks[i].isJoint) joints.push_back(blocks[i].jointIndex);
+				else children.emplace_back(blocks[i].bodyIndex, blocks[i].childIndex);
+			}
+			if (children.empty() && joints.empty())return false;
 			Parser::applyBlockListToNode(blocks, blueprint);
-			std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) {return a.first != b.first ? a.first > b.first:a.second > b.second; });
+			std::sort(joints.begin(), joints.end(), std::greater<int>());
 			bool removed = false;
+			for (int joint : joints)removed = Parser::removeJointFromNode(blueprint, joint) || removed;
+			std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) {return a.first != b.first ? a.first > b.first:a.second > b.second; });
 			for (const auto& child : children)removed = Parser::removeBlockFromNode(blueprint, child.first, child.second) || removed;
 			if (removed) { blocks = Parser::parseBlueprint(blueprint); state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0; state.error = "Selected parts removed. Save Blueprint to write the change to disk."; }
 			return removed;
@@ -1054,7 +1174,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		int span = (int)std::clamp(std::max(maxX - minX, maxY - minY) + 8.f, 12.f, 120.f); int stride = span > 48 ? 4 : 1; int gx0 = (int)std::floor(focus.x) - span / 2, gy0 = (int)std::floor(focus.y) - span / 2;
 		for (int k = 0; k <= span; k += stride) { float d; auto a = screen({ (float)(gx0 + k),(float)gy0,minZ }, d), b = screen({ (float)(gx0 + k),(float)(gy0 + span),minZ }, d); dl->AddLine(a, b, IM_COL32(66, 72, 82, 90)); a = screen({ (float)gx0,(float)(gy0 + k),minZ }, d); b = screen({ (float)(gx0 + span),(float)(gy0 + k),minZ }, d); dl->AddLine(a, b, IM_COL32(66, 72, 82, 90)); }
 
-		struct WorldTri { std::array<ImVec2, 3> p; std::array<float, 3> vertexDepth; std::array<ImU32, 3> color; int block; }; std::vector<WorldTri> triangles;
+		struct WorldTri { std::array<ImVec2, 3> p; std::array<float, 3> vertexDepth; std::array<ImU32, 3> color; std::array<std::array<float, 2>, 3> uv; GLuint texture{}; int block; }; std::vector<WorldTri> triangles;
 		std::vector<std::pair<int, std::array<ImVec2, 8>>> selectedOutlines; bool hasSelectedOutline = false; V3 selectedCenter{};
 		size_t total = 0; for (const auto& b : blocks) { auto m = meshFor(b.shapeID); total += m->loaded ? m->indices.size() / 3 : 12; }
 		// Keep per-frame projection and streamed GPU memory bounded, but let normal
@@ -1086,11 +1206,32 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			if (coarsePreview && !coarsePreviewParts.contains((int)bi))continue;
 			const auto& b = blocks[bi]; auto m = meshFor(b.shapeID); bool imported = m && m->loaded && !m->indices.empty();
 			const int col = displayColor(b);
+			const auto diffusePath = state.shapeDiffuseTextures.find(lower(b.shapeID));
+			const GLuint diffuseTexture = imported && diffusePath != state.shapeDiffuseTextures.end() ? diffuseTextureFor(diffusePath->second) : 0;
 			float red = (float)((col >> 16) & 255) / 255.f, green = (float)((col >> 8) & 255) / 255.f, blue = (float)(col & 255) / 255.f;
 			const V3 dimensions = shapeSize(b);
-			float sc[3] = { dimensions.x,dimensions.y,dimensions.z };
-			V3 lo{}, hi{}; if (imported && m->hasBounds) { lo = m->boundsMin; hi = m->boundsMax; sc[0] /= std::max(.001f, hi.x - lo.x); sc[1] /= std::max(.001f, hi.y - lo.y); sc[2] /= std::max(.001f, hi.z - lo.z); }
-			else imported = false;
+			// Fixed render meshes are authored in game-space units and their origins
+			// are meaningful attachment pivots. Do not scale them to their collision
+			// hull/cylinder or their geometry and pivots drift away from blueprint
+			// positions. Explicit blueprint bounds are the only render-scale request.
+			float sc[3] = { 1.f,1.f,1.f };
+			V3 lo{}, hi{}; if (imported && m->hasBounds) {
+				lo = m->boundsMin; hi = m->boundsMax;
+				if (b.hasBounds) {
+					sc[0] = dimensions.x / std::max(.001f, hi.x - lo.x);
+					sc[1] = dimensions.y / std::max(.001f, hi.y - lo.y);
+					sc[2] = dimensions.z / std::max(.001f, hi.z - lo.z);
+				}
+			}
+			else {
+				// Built-in blocks and missing-model fallbacks use a unit cube mesh.
+				// Scale that cube to the blueprint's saved bounds / ShapeSet footprint
+				// or multi-cell blocks silently collapse back to one grid cell.
+				imported = false;
+				sc[0] = dimensions.x;
+				sc[1] = dimensions.y;
+				sc[2] = dimensions.z;
+			}
 			const V3 center = blockCenter(b);
 			// FBX model vertices are authored around their model pivot. Re-centering
 			// each asset to its mesh AABB loses deliberate pivot offsets (notably the
@@ -1106,11 +1247,11 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				selectedOutlines.emplace_back((int)bi, outline);
 				if ((int)bi == state.selection) { selectedCenter = center; hasSelectedOutline = true; }
 			}
-			auto append = [&](V3 aa, V3 bb, V3 cc, V3 na, V3 nb, V3 nc) {V3 a = world(aa), q = world(bb), r = world(cc); const V3 transformed[3] = { norm(orient({na.x / sc[0],na.y / sc[1],na.z / sc[2]},b)),norm(orient({nb.x / sc[0],nb.y / sc[1],nb.z / sc[2]},b)),norm(orient({nc.x / sc[0],nc.y / sc[1],nc.z / sc[2]},b)) }; const V3 lightDir = norm(V3{ -.4f,.5f,.82f }); ImU32 colors[3]; for (int i = 0; i < 3; i++) { float light = .88f + .12f * std::max(0.f, dot(transformed[i], lightDir)); float shade = isSelected((int)bi) ? std::min(1.f, light * 1.04f) : light; colors[i] = IM_COL32((int)(red * shade * 255), (int)(green * shade * 255), (int)(blue * shade * 255), 255); }float da, db, dc; auto pa = screen(a, da), pb = screen(q, db), pc = screen(r, dc); triangles.push_back({ {pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},(int)bi }); };
+			auto append = [&](V3 aa, V3 bb, V3 cc, V3 na, V3 nb, V3 nc, std::array<float, 2> ta = {}, std::array<float, 2> tb = {}, std::array<float, 2> tc = {}) {V3 a = world(aa), q = world(bb), r = world(cc); const V3 transformed[3] = { norm(orient({na.x / sc[0],na.y / sc[1],na.z / sc[2]},b)),norm(orient({nb.x / sc[0],nb.y / sc[1],nb.z / sc[2]},b)),norm(orient({nc.x / sc[0],nc.y / sc[1],nc.z / sc[2]},b)) }; const V3 lightDir = norm(V3{ -.4f,.5f,.82f }); ImU32 colors[3]; for (int i = 0; i < 3; i++) { float light = .88f + .12f * std::max(0.f, dot(transformed[i], lightDir)); float shade = isSelected((int)bi) ? std::min(1.f, light * 1.04f) : light; colors[i] = IM_COL32((int)(red * shade * 255), (int)(green * shade * 255), (int)(blue * shade * 255), 255); }float da, db, dc; auto pa = screen(a, da), pb = screen(q, db), pc = screen(r, dc); triangles.push_back({ {pa,pb,pc},{da,db,dc},{colors[0],colors[1],colors[2]},{ta,tb,tc},diffuseTexture,(int)bi }); };
 			if (imported) {
 				const size_t sourceTriangles = m->indices.size() / 3;
 				const size_t triangleStride = coarsePreview ? std::max<size_t>(1, (sourceTriangles + perPartTriangleBudget - 1) / perPartTriangleBudget) : 1;
-				for (size_t tri = 0; tri < sourceTriangles; tri += triangleStride) { size_t ti = tri * 3; const auto ia = m->indices[ti], ib = m->indices[ti + 1], ic = m->indices[ti + 2]; if (ia >= m->vertices.size() || ib >= m->vertices.size() || ic >= m->vertices.size())continue; append(m->vertices[ia], m->vertices[ib], m->vertices[ic], m->normals[ia], m->normals[ib], m->normals[ic]); }
+				for (size_t tri = 0; tri < sourceTriangles; tri += triangleStride) { size_t ti = tri * 3; const auto ia = m->indices[ti], ib = m->indices[ti + 1], ic = m->indices[ti + 2]; if (ia >= m->vertices.size() || ib >= m->vertices.size() || ic >= m->vertices.size())continue; const auto uvAt = [&](uint32_t i) {return i < m->uvs.size() ? m->uvs[i] : std::array<float, 2>{}; }; append(m->vertices[ia], m->vertices[ib], m->vertices[ic], m->normals[ia], m->normals[ib], m->normals[ic], uvAt(ia), uvAt(ib), uvAt(ic)); }
 			}
 			else {
 				V3 v[8] = { {-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f} };
@@ -1124,17 +1265,21 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		float farthestDepth = std::numeric_limits<float>::infinity();
 		for (const auto& triangle : triangles)for (float depth : triangle.vertexDepth) { nearestDepth = std::max(nearestDepth, depth); farthestDepth = std::min(farthestDepth, depth); }
 		const float depthRange = std::max(1e-5f, nearestDepth - farthestDepth);
-		std::vector<SceneVertex> gpuVertices; gpuVertices.reserve(triangles.size() * 3);
+		std::vector<SceneBatch> gpuBatches;
+		std::unordered_map<GLuint, size_t> batchByTexture;
 		for (const auto& triangle : triangles)for (size_t corner = 0; corner < 3; corner++) {
 			const ImVec2 point = triangle.p[corner]; const ImU32 packed = triangle.color[corner];
 			const float x = 2.f * (point.x - origin.x) / size.x - 1.f;
 			const float y = 1.f - 2.f * (point.y - origin.y) / size.y;
 			const float z = 2.f * (nearestDepth - triangle.vertexDepth[corner]) / depthRange - 1.f;
-			gpuVertices.push_back({ x,y,z,(float)((packed >> IM_COL32_R_SHIFT) & 0xff) / 255.f,
-				(float)((packed >> IM_COL32_G_SHIFT) & 0xff) / 255.f,(float)((packed >> IM_COL32_B_SHIFT) & 0xff) / 255.f });
+			auto batch = batchByTexture.find(triangle.texture);
+			if (batch == batchByTexture.end()) { batchByTexture[triangle.texture] = gpuBatches.size(); gpuBatches.push_back({ triangle.texture,{} }); batch = batchByTexture.find(triangle.texture); }
+			auto& vertices = gpuBatches[batch->second].vertices;
+			vertices.push_back({ x,y,z,(float)((packed >> IM_COL32_R_SHIFT) & 0xff) / 255.f,
+				(float)((packed >> IM_COL32_G_SHIFT) & 0xff) / 255.f,(float)((packed >> IM_COL32_B_SHIFT) & 0xff) / 255.f,triangle.uv[corner][0],triangle.uv[corner][1] });
 		}
 		if (triangles.empty())state.renderError.clear();
-		const bool sceneRendered = triangles.empty() || drawDepthBufferedScene(gpuVertices, origin, size, dl);
+		const bool sceneRendered = triangles.empty() || drawDepthBufferedScene(gpuBatches, origin, size, dl);
 		if (!sceneRendered) {
 			const ImVec2 message{ origin.x + 12.f,origin.y + 12.f };
 			dl->AddRectFilled(message, ImVec2(message.x + std::min(size.x - 24.f, 500.f), message.y + 50.f), IM_COL32(56, 31, 24, 240), 5.f);
@@ -1161,7 +1306,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			return handle;
 			};
 		auto axisAtMouse = [&](ImVec2 point) {
-			if (!hasSelectedOutline || state.selection < 0 || state.selection >= (int)blocks.size())return 0;
+			if (!hasSelectedOutline || state.selection < 0 || state.selection >= (int)blocks.size() || blocks[state.selection].isJoint)return 0;
 			int hitAxis = 0; float nearest = 12.f;
 			for (int a = 1; a <= 3; a++)for (int sign : {-1, 1}) {
 				const int signedAxis = a * sign; const AxisHandle handle = getAxisHandle(signedAxis);
@@ -1240,7 +1385,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			const ImVec2 delta = ImVec2(mouse.x - state.lastDragMouse.x, mouse.y - state.lastDragMouse.y);
 			state.lastDragMouse = mouse;
 			const int signedAxis = state.dragAxis;
-			if (state.dragWorldPerPixel > 0.f) { state.dragRemainder += (delta.x * state.dragScreenAxis.x + delta.y * state.dragScreenAxis.y) * state.dragWorldPerPixel; const int steps = (int)std::trunc(state.dragRemainder); if (steps) { for (int index : state.dragSelection)if (index >= 0 && index < (int)blocks.size())nudge(blocks[index], signedAxis == 1 ? steps : signedAxis == -1 ? -steps : 0, signedAxis == 2 ? steps : signedAxis == -2 ? -steps : 0, signedAxis == 3 ? steps : signedAxis == -3 ? -steps : 0); state.dragRemainder -= steps; } }
+			if (state.dragWorldPerPixel > 0.f) { state.dragRemainder += (delta.x * state.dragScreenAxis.x + delta.y * state.dragScreenAxis.y) * state.dragWorldPerPixel; const int steps = (int)std::trunc(state.dragRemainder); if (steps) { for (int index : state.dragSelection)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], signedAxis == 1 ? steps : signedAxis == -1 ? -steps : 0, signedAxis == 2 ? steps : signedAxis == -2 ? -steps : 0, signedAxis == 3 ? steps : signedAxis == -3 ? -steps : 0); synchronizeJointPositions(); state.dragRemainder -= steps; } }
 		}
 		ImGui::EndChild(); ImGui::SameLine(); ImGui::BeginChild("BlockInspector", ImVec2(inspector, 0), true);
 		ImGui::Text("INSPECTOR"); ImGui::Separator();
@@ -1252,28 +1397,43 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			if (title.empty())title = "Unknown part";
 			ImGui::TextWrapped("%s", title.c_str());
 			if (multiSelection)ImGui::TextDisabled("%zu parts selected · movement and color apply to all", state.selectionSet.size());
+			else if (b.isJoint)ImGui::TextDisabled("Joint %d  ·  render pivot at attachment A", b.jointIndex + 1);
 			else ImGui::TextDisabled("Part %d of %d  ·  body %d", state.selection + 1, (int)blocks.size(), b.bodyIndex + 1);
 			ImGui::Spacing();
 			ImGui::Text("Position");
-			int positionX = b.pos.x, positionY = b.pos.y, positionZ = b.pos.z;
-			auto positionDelta = [](int target, int current) {
-				const long long delta = (long long)target - (long long)current;
-				return (int)std::clamp(delta, (long long)std::numeric_limits<int>::min(), (long long)std::numeric_limits<int>::max());
-				};
-			ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("X##pos", &positionX, 0, 0))moveSelection(positionDelta(positionX, b.pos.x), 0, 0);
-			ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Y##pos", &positionY, 0, 0))moveSelection(0, positionDelta(positionY, b.pos.y), 0);
-			ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Z##pos", &positionZ, 0, 0))moveSelection(0, 0, positionDelta(positionZ, b.pos.z));
-			if (ImGui::Button("Left -X", ImVec2(-1, 0)))moveSelection(-1, 0, 0); if (ImGui::Button("Right +X", ImVec2(-1, 0)))moveSelection(1, 0, 0);
-			if (ImGui::Button("Forward +Y", ImVec2(-1, 0)))moveSelection(0, 1, 0); if (ImGui::Button("Back -Y", ImVec2(-1, 0)))moveSelection(0, -1, 0);
-			if (ImGui::Button("Up +Z", ImVec2(-1, 0)))moveSelection(0, 0, 1); if (ImGui::Button("Down -Z", ImVec2(-1, 0)))moveSelection(0, 0, -1);
-			ImGui::Spacing(); ImGui::Text("Orientation (Z is up)");
-			static constexpr int axisValues[6] = { -3,-1,-2,1,2,3 };
-			auto axisIndex = [&](int v) {for (int i = 0; i < 6; i++)if (axisValues[i] == v)return i; return 3; };
-			int xi = axisIndex(b.xaxis), zi = axisIndex(b.zaxis);
-			ImGui::Text("Local X axis"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localXAxis", &xi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[xi]; if (std::abs(dot(axis(candidate), axis(b.zaxis))) < .5f)b.xaxis = candidate; else xi = axisIndex(b.xaxis); }
-			ImGui::Text("Local Z axis (up)"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localZAxis", &zi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[zi]; if (std::abs(dot(axis(candidate), axis(b.xaxis))) < .5f)b.zaxis = candidate; else zi = axisIndex(b.zaxis); }
-			if (ImGui::Button("Rotate +90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, 1), rotateAxisAroundZ(b.zaxis, 1)); }if (ImGui::Button("Rotate -90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, -1), rotateAxisAroundZ(b.zaxis, -1)); }
-			if (ImGui::Button("Reset rotation", ImVec2(-1, 0))) { setOrientation(b, 1, 3); }
+			if (b.isJoint) {
+				ImGui::Text("Position");
+				ImGui::TextDisabled("A  (%d, %d, %d)", b.jointPosA.x, b.jointPosA.y, b.jointPosA.z);
+				ImGui::TextDisabled("B  (%d, %d, %d)", b.jointPosB.x, b.jointPosB.y, b.jointPosB.z);
+			}
+			else {
+				int positionX = b.pos.x, positionY = b.pos.y, positionZ = b.pos.z;
+				auto positionDelta = [](int target, int current) {
+					const long long delta = (long long)target - (long long)current;
+					return (int)std::clamp(delta, (long long)std::numeric_limits<int>::min(), (long long)std::numeric_limits<int>::max());
+					};
+				ImGui::Text("Position");
+				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("X##pos", &positionX, 0, 0))moveSelection(positionDelta(positionX, b.pos.x), 0, 0);
+				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Y##pos", &positionY, 0, 0))moveSelection(0, positionDelta(positionY, b.pos.y), 0);
+				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Z##pos", &positionZ, 0, 0))moveSelection(0, 0, positionDelta(positionZ, b.pos.z));
+				if (ImGui::Button("Left -X", ImVec2(-1, 0)))moveSelection(-1, 0, 0); if (ImGui::Button("Right +X", ImVec2(-1, 0)))moveSelection(1, 0, 0);
+				if (ImGui::Button("Forward +Y", ImVec2(-1, 0)))moveSelection(0, 1, 0); if (ImGui::Button("Back -Y", ImVec2(-1, 0)))moveSelection(0, -1, 0);
+				if (ImGui::Button("Up +Z", ImVec2(-1, 0)))moveSelection(0, 0, 1); if (ImGui::Button("Down -Z", ImVec2(-1, 0)))moveSelection(0, 0, -1);
+			}
+			if (b.isJoint) {
+				ImGui::Spacing(); ImGui::Text("Joint orientation");
+				ImGui::TextDisabled("Orientation follows the connected bodies.");
+			}
+			else {
+				ImGui::Spacing(); ImGui::Text("Orientation (Z is up)");
+				static constexpr int axisValues[6] = { -3,-1,-2,1,2,3 };
+				auto axisIndex = [&](int v) {for (int i = 0; i < 6; i++)if (axisValues[i] == v)return i; return 3; };
+				int xi = axisIndex(b.xaxis), zi = axisIndex(b.zaxis);
+				ImGui::Text("Local X axis"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localXAxis", &xi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[xi]; if (std::abs(dot(axis(candidate), axis(b.zaxis))) < .5f)b.xaxis = candidate; else xi = axisIndex(b.xaxis); }
+				ImGui::Text("Local Z axis (up)"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localZAxis", &zi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[zi]; if (std::abs(dot(axis(candidate), axis(b.xaxis))) < .5f)b.zaxis = candidate; else zi = axisIndex(b.zaxis); }
+				if (ImGui::Button("Rotate +90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, 1), rotateAxisAroundZ(b.zaxis, 1)); }if (ImGui::Button("Rotate -90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, -1), rotateAxisAroundZ(b.zaxis, -1)); }
+				if (ImGui::Button("Reset rotation", ImVec2(-1, 0))) { setOrientation(b, 1, 3); }
+			}
 			ImGui::Spacing(); ImGui::Text("Dimensions");
 			const bool canResize = state.blockShapes.contains(lower(b.shapeID));
 			if (multiSelection) {

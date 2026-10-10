@@ -1,107 +1,91 @@
 #pragma once
 
-#include <iostream>
-#include <fstream>
+#include <filesystem>
+#include <algorithm>
+#include <cstdlib>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include <filesystem>
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
+
 namespace Parser {
-	struct BlueprintPaths {
-		fs::path folderPath;
-		fs::path descriptionPath;
-		fs::path iconPath;
-	};
+struct BlueprintPaths {
+	fs::path folderPath;
+	fs::path descriptionPath;
+	fs::path iconPath;
+};
 
-	struct Position {
-		int x = 0, y = 0, z = 0;
-	};
+struct Position { int x = 0, y = 0, z = 0; };
 
-	struct Block {
-		Position bounds{ 1, 1, 1 }; // Default 1x1x1 for Scrap Mechanic blocks
-		bool hasBounds = false; // True only when the blueprint stores an explicit bounds field
-		std::string color = "ffffff";
-		bool hasColor = false; // Distinguishes an explicit white tint from the game's shape default
-		Position pos{ 0, 0, 0 };
-		std::string shapeID = "";
-		int xaxis = 1;
-		int zaxis = 3;
+// A UI-facing record for either a body child or a serialized joint. The indices
+// always refer back to their original JSON arrays so unknown blueprint fields
+// remain intact when edits are saved.
+struct Block {
+	Position bounds{ 1, 1, 1 };
+	bool hasBounds = false;
+	std::string color = "ffffff";
+	bool hasColor = false;
+	Position pos{};
+	std::string shapeID;
+	int xaxis = 1;
+	int zaxis = 3;
+	int bodyIndex = -1;
+	int childIndex = -1;
+	bool isJoint = false;
+	int jointIndex = -1;
+	std::int64_t jointId = -1;
+	int jointChildA = -1;
+	int jointChildB = -1;
+	Position jointPosA{};
+	Position jointPosB{};
+};
 
-		// Indices to track the block's position in the blueprint structure
-		int bodyIndex = 0;
-		int childIndex = 0;
-	};
+std::vector<Block> parseBlueprint(const json& blueprint);
+Block parseBlock(const json& block, int bodyIndex, int childIndex);
+void applyBlockListToNode(const std::vector<Block>& blocks, json& blueprint);
+bool removeBlockFromNode(json& blueprint, int bodyIndex, int childIndex);
+bool removeJointFromNode(json& blueprint, int jointIndex);
+bool saveBlueprint(const std::string& filepath, const json& blueprint);
+std::string findBlockNameByShapeID(const std::string& shapeID, const json& items);
+std::string findShapeIDByBlockName(const std::string& blockName, const json& items);
 
-	std::vector<Block> parseBlueprint(const json& blueprintJson);
-	Block parseBlock(const json& blockJson, int bodyIndex, int childIndex);
-
-	void applyBlockListToNode(const std::vector<Block>& blockVector, json& blueprintJson);
-	bool removeBlockFromNode(json& blueprintJson, int bodyIndex, int childIndex);
-
-	bool saveBlueprint(const std::string& filepath, const json& blueprint);
-	std::string findBlockNameByShapeID(const std::string& shapeID, const json& items);
-
-	std::string findShapeIDByBlockName(const std::string& blockName, const json& items);
-
-	inline int getBlockCount(std::vector<Block>& blockList, const std::string& shapeID = "") {
-		int count = 0;
-
-		for (const auto& block : blockList) {
-			if (shapeID.empty() || block.shapeID == shapeID) // If shapeID is empty, count all blocks, else count only those matching the shapeID
-				count += block.bounds.x * block.bounds.y * block.bounds.z; // Count all blocks using their bounds
-		}
-		return count;
+inline int getBlockCount(const std::vector<Block>& blocks, const std::string& shapeID = "") {
+	int count = 0;
+	for (const auto& block : blocks) {
+		if (!shapeID.empty() && block.shapeID != shapeID) continue;
+		if (block.isJoint) { ++count; continue; }
+		const auto volume = static_cast<long long>(std::max(1, block.bounds.x)) * std::max(1, block.bounds.y) * std::max(1, block.bounds.z);
+		count += static_cast<int>(std::min<long long>(volume, 1000000));
 	}
-
-
-	inline std::vector<BlueprintPaths> getBlueprintFolders() { // ai slop
-		std::vector<BlueprintPaths> blueprints;
-
-		// 1. Get %APPDATA%
-		char* appdataBuf = nullptr;
-		size_t len = 0;
-		if (_dupenv_s(&appdataBuf, &len, "APPDATA") != 0 || appdataBuf == nullptr) {
-			return blueprints;
-		}
-		fs::path appdata(appdataBuf);
-		free(appdataBuf);
-
-		// 2. Find the User_<ID>/Blueprints directory
-		fs::path userDir = appdata / "Axolot Games" / "Scrap Mechanic" / "User";
-		fs::path blueprintsDir;
-
-		if (fs::exists(userDir) && fs::is_directory(userDir)) {
-			for (const auto& entry : fs::directory_iterator(userDir)) {
-				if (entry.is_directory() && entry.path().filename().string().rfind("User_", 0) == 0) {
-					fs::path candidate = entry.path() / "Blueprints";
-					if (fs::exists(candidate)) {
-						blueprintsDir = candidate;
-						break;
-					}
-				}
-			}
-		}
-
-		if (blueprintsDir.empty()) return blueprints;
-
-		// 3. Scan all blueprint subfolders
-		for (const auto& entry : fs::directory_iterator(blueprintsDir)) {
-			if (entry.is_directory()) {
-				BlueprintPaths bp;
-				bp.folderPath = entry.path();
-				bp.descriptionPath = entry.path() / "description.json";
-				bp.iconPath = entry.path() / "icon.png";
-
-				blueprints.push_back(bp);
-			}
-		}
-
-		return blueprints;
-	}
-
-
+	return count;
 }
 
-
+inline std::vector<BlueprintPaths> getBlueprintFolders() {
+	std::vector<BlueprintPaths> result;
+	#ifdef _WIN32
+	char* appDataBuffer = nullptr;
+	size_t length = 0;
+	if (_dupenv_s(&appDataBuffer, &length, "APPDATA") != 0 || !appDataBuffer) return result;
+	const fs::path userRoot = fs::path(appDataBuffer) / "Axolot Games" / "Scrap Mechanic" / "User";
+	free(appDataBuffer);
+	std::error_code error;
+	if (!fs::is_directory(userRoot, error)) return result;
+	for (const auto& user : fs::directory_iterator(userRoot, error)) {
+		if (error) break;
+		if (!user.is_directory(error) || user.path().filename().string().rfind("User_", 0) != 0) continue;
+		const auto root = user.path() / "Blueprints";
+		if (!fs::is_directory(root, error)) continue;
+		for (const auto& entry : fs::directory_iterator(root, error)) {
+			if (error) break;
+			if (!entry.is_directory(error)) continue;
+			result.push_back({ entry.path(), entry.path() / "description.json", entry.path() / "icon.png" });
+		}
+		break;
+	}
+	#endif
+	return result;
+}
+}

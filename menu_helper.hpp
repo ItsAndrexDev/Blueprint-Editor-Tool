@@ -6,6 +6,7 @@
 #include "imgui/imgui_impl_opengl3.h"
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 #include <utility>
 #include "helpers/blueprint_viewport.hpp"
 struct BlueprintItem {
