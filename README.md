@@ -1,10 +1,10 @@
 # Scrap Mechanic Blueprint Editor
-Known Issues: incorrectly flagging upgradable items as survival only, seats,saddles being rendered as a box due to fallback mechanics.
 An independent desktop project for viewing and editing Scrap Mechanic blueprints outside the game. It turns a saved blueprint into a 3D scene so you can select parts, change their placement and appearance, and save the result without editing blueprint JSON by hand.
 
 The recent Scrap Mechanic update broke older external blueprint editors. This project is being developed as the currently working standalone editor for the updated game, with direct access to your saved blueprints and the game’s part models.
 
 ## What it does
+<img width="1919" height="1029" alt="image" src="https://github.com/user-attachments/assets/8506f7a5-f254-4771-9e5d-e89aa9e03d49" />
 
 - Finds and lists blueprints in your Scrap Mechanic user folder.
 - Searches the list and refreshes it when blueprints are added.
@@ -27,6 +27,7 @@ Use **Undo** or **Ctrl+Z** to undo an edit, and **Redo** or **Ctrl+Y** to restor
 The editor saves directly to the selected blueprint folder. Make a backup of important blueprints before editing.
 
 ## Selection and movement
+<img width="1908" height="1028" alt="image" src="https://github.com/user-attachments/assets/580f48db-67dd-4ae0-bb5a-2372f3a7925d" />
 
 - Click a part to select it. Hold **Shift** and click other parts to add them to the selection.
 - Drag one of the **+X**, **-X**, **+Y**, **-Y**, **+Z**, or **-Z** arrows to move the entire selection along that axis.
@@ -38,6 +39,8 @@ The editor saves directly to the selected blueprint folder. Make a backup of imp
 - Press **Delete** or click **Remove selected parts** to remove the selection.
 
 Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable blocks, local Z is height and local Y is depth. When multiple parts are selected, the Dimensions panel shows the combined world-space width (X), depth (Y), and height (Z) of the selection.
+
+
 
 ## Color and dimensions
 
