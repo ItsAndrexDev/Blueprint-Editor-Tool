@@ -145,6 +145,14 @@
     <ClCompile Include="gui_manager.cpp" />
     <ClCompile Include="helpers\AptosFont.hpp" />
     <ClCompile Include="helpers\blueprint_viewport.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_actions.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_catalog.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_model_loader.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_fbx.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_dae.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_ogre.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_renderer.cpp" />
+    <ClCompile Include="helpers\blueprint_viewport_inspector.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_demo.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
@@ -171,6 +179,7 @@
     <ClInclude Include="helpers\scrap_parser.hpp" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="helpers\blueprint_viewport.hpp" />
+    <ClInclude Include="helpers\blueprint_viewport_internal.hpp" />
     <ClInclude Include="helpers\fbx_inflate.hpp" />
     <ClInclude Include="helpers\stb_image.h" />
     <ClInclude Include="menu_helper.hpp" />
