@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -20,6 +21,31 @@ struct BlueprintPaths {
 };
 
 struct Position { int x = 0, y = 0, z = 0; };
+
+struct ClipboardChild {
+	int sourceBodyIndex = -1;
+	int sourceFlatIndex = -1;
+	json data;
+};
+
+struct ClipboardJoint {
+	int sourceChildA = -1;
+	int sourceChildB = -1;
+	json data;
+};
+
+struct SelectionClipboard {
+	std::vector<ClipboardChild> children;
+	std::vector<ClipboardJoint> joints;
+	bool copyBlockState = false;
+	bool empty() const { return children.empty() && joints.empty(); }
+	std::size_t objectCount() const { return children.size() + joints.size(); }
+};
+
+struct PasteSelectionResult {
+	std::vector<std::pair<int, int>> children;
+	std::vector<int> joints;
+};
 
 // A UI-facing record for either a body child or a serialized joint. The indices
 // always refer back to their original JSON arrays so unknown blueprint fields
@@ -49,6 +75,8 @@ Block parseBlock(const json& block, int bodyIndex, int childIndex);
 void applyBlockListToNode(const std::vector<Block>& blocks, json& blueprint);
 bool removeBlockFromNode(json& blueprint, int bodyIndex, int childIndex);
 bool removeJointFromNode(json& blueprint, int jointIndex);
+bool captureSelectionClipboard(const json& blueprint, const std::vector<Block>& blocks, const std::vector<int>& selection, bool copyBlockState, SelectionClipboard& clipboard);
+bool pasteSelectionClipboard(json& blueprint, const SelectionClipboard& clipboard, Position offset, PasteSelectionResult& result);
 bool addDirectedConnection(json& blueprint, const std::vector<Block>& blocks, int sourceIndex, int targetIndex);
 bool removeConnectionById(json& blueprint, const std::vector<Block>& blocks, int sourceIndex, std::int64_t targetControllerId);
 bool saveBlueprint(const std::string& filepath, const json& blueprint);

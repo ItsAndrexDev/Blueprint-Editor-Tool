@@ -58,6 +58,10 @@ namespace BlueprintViewport {
 			bool stackSelection{};
 			bool logicManipulation{};
 			int logicSource = -1;
+			bool copyBlockState{};
+			Parser::SelectionClipboard clipboard;
+			std::filesystem::path clipboardBlueprint;
+			size_t clipboardPasteCount{};
 			std::vector<int> dragSelection;
 			// Keep the default camera on the same side of the creation as the game
 			// blueprint preview; the opposite yaw reflects asymmetric builds in top view.
@@ -1190,6 +1194,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		const std::string& blueprintName, bool& backToSelectionRequested) {
 		loadCatalog();
 		if (state.currentBlueprint != blueprintPath) { state.meshes.clear(); state.meshFiles.clear(); state.meshCacheBytes = 0; state.currentBlueprint = blueprintPath; state.selection = -1; state.selectionSet.clear(); state.stackSelection = false; state.logicManipulation = false; state.logicSource = -1; state.dragSelection.clear(); state.dragAxis = 0; state.pan = { 0,0 }; state.zoom = 1.f; state.blueprintHistory.clear(); state.blueprintHistory.push_back(blueprint); Parser::applyBlockListToNode(blocks, state.blueprintHistory.back()); state.historyCursor = 0; state.historyActionInProgress = false; }
+		if (state.clipboardBlueprint != blueprintPath) { state.clipboard = {}; state.clipboardBlueprint = blueprintPath; state.clipboardPasteCount = 0; }
 		for (auto it = state.selectionSet.begin(); it != state.selectionSet.end();)if (*it < 0 || *it >= (int)blocks.size())it = state.selectionSet.erase(it); else ++it;
 		if (state.selection < 0 || state.selection >= (int)blocks.size())state.selection = -1;
 		if (state.selection >= 0)state.selectionSet.insert(state.selection);
@@ -1332,11 +1337,52 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			if (removed) { blocks = Parser::parseBlueprint(blueprint); state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0; state.error = "Selected parts removed. Save Blueprint to write the change to disk."; }
 			return removed;
 			};
+		auto copySelectedObjects = [&]() {
+			std::vector<int> selected;
+			selected.reserve(state.selectionSet.size() + (state.selection >= 0 ? 1u : 0u));
+			for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size())selected.push_back(index);
+			if (state.selection >= 0 && state.selection < (int)blocks.size() && std::find(selected.begin(), selected.end(), state.selection) == selected.end())selected.push_back(state.selection);
+			std::sort(selected.begin(), selected.end());
+			if (selected.empty()) { notify("Select objects to copy"); return; }
+			Parser::applyBlockListToNode(blocks, blueprint);
+			Parser::SelectionClipboard copied;
+			if (!Parser::captureSelectionClipboard(blueprint, blocks, selected, state.copyBlockState, copied)) { notify("Nothing selected could be copied"); return; }
+			state.clipboard = std::move(copied);
+			state.clipboardBlueprint = blueprintPath;
+			state.clipboardPasteCount = 0;
+			notify("Copied " + std::to_string(state.clipboard.objectCount()) + " object(s)");
+		};
+		auto pasteCopiedObjects = [&]() {
+			if (state.clipboard.empty() || state.clipboardBlueprint != blueprintPath) { notify("Clipboard is empty for this blueprint"); return; }
+			Parser::applyBlockListToNode(blocks, blueprint);
+			const int pasteOffset = (int)std::min<size_t>(state.clipboardPasteCount + 1, 1000000);
+			Parser::PasteSelectionResult pasted;
+			if (!Parser::pasteSelectionClipboard(blueprint, state.clipboard, { pasteOffset,0,0 }, pasted)) { notify("Could not paste the copied objects"); return; }
+			blocks = Parser::parseBlueprint(blueprint);
+			state.selection = -1;
+			state.selectionSet.clear();
+			for (int index = 0; index < (int)blocks.size(); ++index) {
+				const auto& block = blocks[index];
+				if (block.isJoint) {
+					if (std::find(pasted.joints.begin(), pasted.joints.end(), block.jointIndex) != pasted.joints.end())state.selectionSet.insert(index);
+				}
+				else if (std::find(pasted.children.begin(), pasted.children.end(), std::pair<int, int>{ block.bodyIndex,block.childIndex }) != pasted.children.end())state.selectionSet.insert(index);
+			}
+			if (!state.selectionSet.empty())state.selection = *std::min_element(state.selectionSet.begin(), state.selectionSet.end());
+			state.stackSelection = false;
+			state.logicSource = -1;
+			state.dragSelection.clear(); state.dragAxis = 0;
+			++state.clipboardPasteCount;
+			const size_t copiedCount = pasted.children.size() + pasted.joints.size();
+			notify("Pasted " + std::to_string(copiedCount) + " object(s) at +X " + std::to_string(pasteOffset));
+		};
 		const ImGuiIO& io = ImGui::GetIO();
 		const bool shortcutReady = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 		if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))undo();
 		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false))redo();
 		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))saveBlueprint();
+		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false))copySelectedObjects();
+		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false))pasteCopiedObjects();
 		if (shortcutReady && state.logicManipulation && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) { state.logicManipulation = false; state.logicSource = -1; notify("Logic manipulation disabled"); }
 		if (shortcutReady && ImGui::IsKeyPressed(ImGuiKey_Delete, false))removeSelection();
 		ImGui::TextWrapped("Editing: %s", blueprintName.c_str());
@@ -1347,6 +1393,19 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor == 0); if (ImGui::Button("Undo"))undo(); ImGui::EndDisabled();
 		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor + 1 >= state.blueprintHistory.size()); if (ImGui::Button("Redo"))redo(); ImGui::EndDisabled();
 		ImGui::SameLine(); if (ImGui::Button("Reset view")) { state.yaw = .72f; state.pitch = .42f; state.zoom = 1.f; state.pan = { 0,0 }; notify("View reset"); }
+		ImGui::Spacing();
+		const bool hasCopySelection = state.selection >= 0 || !state.selectionSet.empty();
+		ImGui::BeginDisabled(!hasCopySelection);
+		if (ImGui::Button("Copy"))copySelectedObjects();
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(state.clipboard.empty() || state.clipboardBlueprint != blueprintPath);
+		if (ImGui::Button("Paste"))pasteCopiedObjects();
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::Checkbox("Copy block state (connections)", &state.copyBlockState);
+		if (ImGui::IsItemHovered())ImGui::SetTooltip("Set this before copying. Enabled copies controller settings and links; links between copied parts point to the new copies, and links to unselected parts remain connected to the originals. Disabled resets controller state and clears logic links.");
+		ImGui::SameLine(); ImGui::TextDisabled("Ctrl+C / Ctrl+V");
 		ImGui::Spacing();
 		const bool logicButtonWasActive = state.logicManipulation;
 		if (logicButtonWasActive) {

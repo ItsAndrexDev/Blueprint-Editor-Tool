@@ -115,6 +115,8 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("For block dimensions, local Z is Height and local Y is Depth. Orientation controls label the upright axis as local Z.");
 	ImGui::BulletText("Position fields, movement buttons, and axis arrows move the whole selection. Rotation edits the active part. Color changes apply to every selected part.");
 	ImGui::BulletText("In the Inspector, enable Stack selected parts at active position to place selected parts together. Movement keeps them stacked, and the active part sets their shared position.");
+	ImGui::BulletText("Use Copy / Paste or Ctrl+C / Ctrl+V to duplicate the selected parts and joints. Joints between copied parts are included automatically. Part copies are selected after paste and move one additional grid unit along +X each time; their copied joints follow them.");
+	ImGui::BulletText("Set Copy block state (connections) before copying. When enabled, controller settings and links are copied; links between copied parts target their new copies, while links to unselected parts still target the originals. When disabled, controller settings reset and logic links are cleared.");
 	ImGui::BulletText("Enable Logic manipulation and click a source part, then click targets to add directed connections. Click the source itself to wire it into itself, or Shift-click a different part to switch sources. Click empty viewport space to clear the source and selection. Visible arrows show connection direction; click an arrow to remove that link. Press Esc or disable the mode to return to normal selection and movement.");
 	ImGui::BulletText("With one part selected, Dimensions lets you resize built-in blocks. With multiple parts selected, it shows their combined world-space Width (X), Depth (Y), and Height (Z).");
 	ImGui::BulletText("Press Delete to remove all selected parts.");
@@ -129,6 +131,7 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("Shift + click: add a part to the current selection.");
 	ImGui::BulletText("Ctrl + S: save the edited blueprint.");
 	ImGui::BulletText("Ctrl + Z: undo the last edit. Ctrl + Y: redo an undone edit.");
+	ImGui::BulletText("Ctrl + C: copy selected objects. Ctrl + V: paste them; copied parts move one grid unit farther along +X each time.");
 	ImGui::BulletText("Delete: remove the selected part or parts.");
 	ImGui::BulletText("Right mouse + drag: orbit. Middle mouse + drag: pan. Mouse wheel: zoom.");
 	ImGui::Spacing();

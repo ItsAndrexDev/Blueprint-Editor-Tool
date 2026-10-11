@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace {
@@ -211,6 +213,276 @@ bool Parser::removeJointFromNode(json& blueprint, int jointIndex) {
 		}
 	}
 	blueprint["joints"].erase(blueprint["joints"].begin() + jointIndex);
+	return true;
+}
+
+bool Parser::captureSelectionClipboard(const json& blueprint, const std::vector<Block>& blocks,
+	const std::vector<int>& selection, bool copyBlockState, SelectionClipboard& clipboard) {
+	clipboard = {};
+	clipboard.copyBlockState = copyBlockState;
+	if (!blueprint.is_object() || !blueprint.contains("bodies") || !blueprint["bodies"].is_array())return false;
+	std::unordered_set<int> selectedBlocks, selectedChildFlats, selectedJointIndices;
+	for (int index : selection) {
+		if (index < 0 || index >= (int)blocks.size() || !selectedBlocks.insert(index).second)continue;
+		const auto& block = blocks[index];
+		if (block.isJoint) {
+			if (blueprint.contains("joints") && blueprint["joints"].is_array() && block.jointIndex >= 0 && block.jointIndex < (int)blueprint["joints"].size())
+				selectedJointIndices.insert(block.jointIndex);
+			continue;
+		}
+		const int flat = flatChildIndex(blueprint, block.bodyIndex, block.childIndex);
+		if (flat < 0 || block.bodyIndex < 0 || block.bodyIndex >= (int)blueprint["bodies"].size())continue;
+		const auto& body = blueprint["bodies"][block.bodyIndex];
+		if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array() || block.childIndex < 0 || block.childIndex >= (int)body["childs"].size())continue;
+		const auto& child = body["childs"][block.childIndex];
+		if (!child.is_object())continue;
+		selectedChildFlats.insert(flat);
+		clipboard.children.push_back({ block.bodyIndex,flat,child });
+	}
+	if (blueprint.contains("joints") && blueprint["joints"].is_array()) {
+		for (int jointIndex = 0; jointIndex < (int)blueprint["joints"].size(); ++jointIndex) {
+			const auto& joint = blueprint["joints"][jointIndex];
+			if (!joint.is_object())continue;
+			const int childA = integer(joint, "childA", -1), childB = integer(joint, "childB", -1);
+			const bool jointSelected = selectedJointIndices.contains(jointIndex);
+			const bool internalToSelection = selectedChildFlats.contains(childA) && selectedChildFlats.contains(childB);
+			if (!jointSelected && !internalToSelection)continue;
+			clipboard.joints.push_back({ childA,childB,joint });
+		}
+	}
+	return !clipboard.empty();
+}
+
+bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& clipboard, Position offset,
+	PasteSelectionResult& result) {
+	result = {};
+	if (clipboard.empty() || !blueprint.is_object() || !blueprint.contains("bodies") || !blueprint["bodies"].is_array())return false;
+	if (!clipboard.joints.empty() && blueprint.contains("joints") && !blueprint["joints"].is_array() && !blueprint["joints"].is_null())return false;
+
+	std::map<int, std::vector<size_t>> childrenBySourceBody;
+	std::unordered_map<int, size_t> clipboardChildBySourceFlat;
+	for (size_t i = 0; i < clipboard.children.size(); ++i) {
+		const auto& child = clipboard.children[i];
+		if (child.sourceBodyIndex < 0 || child.sourceFlatIndex < 0 || !child.data.is_object() || !child.data.contains("shapeId") || !child.data["shapeId"].is_string())return false;
+		childrenBySourceBody[child.sourceBodyIndex].push_back(i);
+		clipboardChildBySourceFlat.emplace(child.sourceFlatIndex, i);
+	}
+	for (const auto& joint : clipboard.joints)if (!joint.data.is_object())return false;
+
+	std::unordered_set<std::int64_t> usedIds, existingControllerIds;
+	auto rememberId = [&](const json& value) {
+		if (!value.is_number_integer())return;
+		try { const auto id = value.get<std::int64_t>(); usedIds.insert(id); } catch (...) {}
+	};
+	auto rememberControllerId = [&](const json& owner) {
+		if (!owner.is_object() || !owner.contains("controller") || !owner["controller"].is_object() || !owner["controller"].contains("id") || !owner["controller"]["id"].is_number_integer())return;
+		try { const auto id = owner["controller"]["id"].get<std::int64_t>(); usedIds.insert(id); existingControllerIds.insert(id); } catch (...) {}
+	};
+	if (blueprint.contains("bodies") && blueprint["bodies"].is_array())for (const auto& body : blueprint["bodies"]) {
+		if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())continue;
+		for (const auto& child : body["childs"])rememberControllerId(child);
+	}
+	if (blueprint.contains("joints") && blueprint["joints"].is_array())for (const auto& joint : blueprint["joints"]) {
+		if (!joint.is_object())continue;
+		if (joint.contains("id"))rememberId(joint["id"]);
+		rememberControllerId(joint);
+	}
+	for (const auto& child : clipboard.children)
+		if (child.data.is_object() && child.data.contains("controller") && child.data["controller"].is_object() && child.data["controller"].contains("id"))rememberId(child.data["controller"]["id"]);
+	for (const auto& joint : clipboard.joints) {
+		if (joint.data.contains("id"))rememberId(joint.data["id"]);
+		if (joint.data.is_object() && joint.data.contains("controller") && joint.data["controller"].is_object() && joint.data["controller"].contains("id"))rememberId(joint.data["controller"]["id"]);
+	}
+	std::int64_t maximumId = 0;
+	for (const auto id : usedIds)if (id > maximumId)maximumId = id;
+	std::int64_t nextId = maximumId == std::numeric_limits<std::int64_t>::max() ? 1 : maximumId + 1;
+	auto allocateId = [&]() {
+		while (usedIds.contains(nextId))nextId = nextId == std::numeric_limits<std::int64_t>::max() ? 1 : nextId + 1;
+		const std::int64_t allocated = nextId;
+		usedIds.insert(allocated);
+		nextId = nextId == std::numeric_limits<std::int64_t>::max() ? 1 : nextId + 1;
+		return allocated;
+	};
+	auto translate = [](int value, int delta) {
+		const long long translated = (long long)value + (long long)delta;
+		return (int)std::clamp(translated, (long long)std::numeric_limits<int>::min(), (long long)std::numeric_limits<int>::max());
+	};
+	auto setControllerId = [&](json& owner, std::unordered_map<std::int64_t, std::int64_t>& remap) {
+		if (!owner.is_object() || !owner.contains("controller") || !owner["controller"].is_object())return;
+		auto& controller = owner["controller"];
+		std::int64_t oldId = -1;
+		if (controller.contains("id") && controller["id"].is_number_integer())try { oldId = controller["id"].get<std::int64_t>(); } catch (...) {}
+		const std::int64_t newId = allocateId();
+		controller["id"] = newId;
+		if (oldId >= 0)remap.try_emplace(oldId, newId);
+	};
+	std::unordered_map<std::int64_t, std::int64_t> controllerIdRemap, jointIdRemap;
+	std::vector<json> clonedChildren;
+	clonedChildren.reserve(clipboard.children.size());
+	for (const auto& clipboardChild : clipboard.children) {
+		json child = clipboardChild.data;
+		if (child.contains("pos") && child["pos"].is_object()) {
+			auto p = position(child["pos"]);
+			writePosition(child, "pos", { translate(p.x, offset.x),translate(p.y, offset.y),translate(p.z, offset.z) });
+		}
+		setControllerId(child, controllerIdRemap);
+		clonedChildren.push_back(std::move(child));
+	}
+	std::vector<json> clonedJoints;
+	clonedJoints.reserve(clipboard.joints.size());
+	for (const auto& clipboardJoint : clipboard.joints) {
+		json joint = clipboardJoint.data;
+		std::int64_t oldJointId = -1;
+		if (joint.contains("id") && joint["id"].is_number_integer())try { oldJointId = joint["id"].get<std::int64_t>(); } catch (...) {}
+		const std::int64_t newJointId = allocateId();
+		joint["id"] = newJointId;
+		if (oldJointId >= 0)jointIdRemap.try_emplace(oldJointId, newJointId);
+		setControllerId(joint, controllerIdRemap);
+		clonedJoints.push_back(std::move(joint));
+	}
+
+	json staged = blueprint;
+	PasteSelectionResult stagedResult;
+	std::unordered_map<int, int> newFlatBySourceFlat;
+	int existingChildCount = 0;
+	for (const auto& body : staged["bodies"])if (body.is_object() && body.contains("childs") && body["childs"].is_array())existingChildCount += (int)body["childs"].size();
+	const int originalChildCount = existingChildCount;
+	for (const auto& [sourceBody, childIndices] : childrenBySourceBody) {
+		(void)sourceBody;
+		const int newBodyIndex = (int)staged["bodies"].size();
+		json newBody = json::object();
+		newBody["childs"] = json::array();
+		for (size_t clipboardChildIndex : childIndices) {
+			const int newChildIndex = (int)newBody["childs"].size();
+			const int newFlatIndex = existingChildCount + newChildIndex;
+			const auto& source = clipboard.children[clipboardChildIndex];
+			newFlatBySourceFlat.emplace(source.sourceFlatIndex, newFlatIndex);
+			newBody["childs"].push_back(std::move(clonedChildren[clipboardChildIndex]));
+			stagedResult.children.emplace_back(newBodyIndex, newChildIndex);
+		}
+		existingChildCount += (int)newBody["childs"].size();
+		staged["bodies"].push_back(std::move(newBody));
+	}
+
+	auto remapControllerState = [&](json& owner) {
+		if (!owner.is_object() || !owner.contains("controller") || !owner["controller"].is_object())return;
+		auto& controller = owner["controller"];
+		const std::int64_t id = controller.value("id", (std::int64_t)-1);
+		if (!clipboard.copyBlockState) {
+			controller = { {"id", id}, {"controllers", nullptr}, {"joints", nullptr} };
+			return;
+		}
+		if (controller.contains("controllers") && controller["controllers"].is_array()) {
+			auto& connections = controller["controllers"];
+			connections.erase(std::remove_if(connections.begin(), connections.end(), [&](json& connection) {
+				if (!connection.is_object() || !connection.contains("id") || !connection["id"].is_number_integer())return false;
+				try {
+					const auto targetId = connection["id"].get<std::int64_t>();
+					auto cloned = controllerIdRemap.find(targetId);
+					if (cloned != controllerIdRemap.end()) { connection["id"] = cloned->second; return false; }
+					return !existingControllerIds.contains(targetId);
+				} catch (...) { return false; }
+			}), connections.end());
+		}
+		if (controller.contains("joints") && controller["joints"].is_array()) {
+			auto& configuredJoints = controller["joints"];
+			configuredJoints.erase(std::remove_if(configuredJoints.begin(), configuredJoints.end(), [&](json& reference) {
+				if (!reference.is_object() || !reference.contains("id") || !reference["id"].is_number_integer())return false;
+				try {
+					auto cloned = jointIdRemap.find(reference["id"].get<std::int64_t>());
+					if (cloned == jointIdRemap.end())return true;
+					reference["id"] = cloned->second;
+					return false;
+				} catch (...) { return false; }
+			}), configuredJoints.end());
+		}
+	};
+	auto remapChildJointReferences = [&](json& child) {
+		if (!child.is_object() || !child.contains("joints") || !child["joints"].is_array())return;
+		auto& references = child["joints"];
+		references.erase(std::remove_if(references.begin(), references.end(), [&](json& reference) {
+			if (!reference.is_object() || !reference.contains("id") || !reference["id"].is_number_integer())return false;
+			try {
+				auto cloned = jointIdRemap.find(reference["id"].get<std::int64_t>());
+				if (cloned == jointIdRemap.end())return true;
+				reference["id"] = cloned->second;
+				return false;
+			} catch (...) { return false; }
+		}), references.end());
+		if (references.empty())child.erase("joints");
+	};
+	auto ensureJointReference = [](json& child, std::int64_t id) {
+		if (!child.is_object())return;
+		if (!child.contains("joints") || !child["joints"].is_array())child["joints"] = json::array();
+		auto& references = child["joints"];
+		for (const auto& reference : references)if (reference.is_object() && reference.contains("id") && reference["id"].is_number_integer())
+			try { if (reference["id"].get<std::int64_t>() == id)return; } catch (...) {}
+		references.push_back({ {"id", id} });
+	};
+	auto childByFlatIndex = [&](int flat) -> json* {
+		for (int bodyIndex = 0; bodyIndex < (int)staged["bodies"].size(); ++bodyIndex) {
+			auto& body = staged["bodies"][bodyIndex];
+			if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())continue;
+			for (int childIndex = 0; childIndex < (int)body["childs"].size(); ++childIndex)
+				if (flatChildIndex(staged, bodyIndex, childIndex) == flat)return &body["childs"][childIndex];
+		}
+		return nullptr;
+	};
+	std::unordered_set<int> pastedFlatIndices;
+	for (const auto& [sourceFlat, pastedFlat] : newFlatBySourceFlat) { (void)sourceFlat; pastedFlatIndices.insert(pastedFlat); }
+	for (int bodyIndex = 0; bodyIndex < (int)staged["bodies"].size(); ++bodyIndex) {
+		auto& body = staged["bodies"][bodyIndex];
+		if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())continue;
+		for (int childIndex = 0; childIndex < (int)body["childs"].size(); ++childIndex) {
+			if (!pastedFlatIndices.contains(flatChildIndex(staged, bodyIndex, childIndex)))continue;
+			auto& child = body["childs"][childIndex];
+			remapChildJointReferences(child);
+			remapControllerState(child);
+		}
+	}
+	for (auto& joint : clonedJoints)remapControllerState(joint);
+	std::vector<std::pair<int, std::int64_t>> originalEndpointReferences;
+	for (size_t i = 0; i < clipboard.joints.size(); ++i) {
+		const auto& source = clipboard.joints[i];
+		auto& joint = clonedJoints[i];
+		for (const auto& endpoint : { std::pair<const char*, int>{"A",source.sourceChildA},std::pair<const char*, int>{"B",source.sourceChildB} }) {
+			const char* childKey = endpoint.first == std::string("A") ? "childA" : "childB";
+			const char* posKey = endpoint.first == std::string("A") ? "posA" : "posB";
+			auto copiedChild = clipboardChildBySourceFlat.find(endpoint.second);
+			if (copiedChild != clipboardChildBySourceFlat.end()) {
+				auto pastedFlat = newFlatBySourceFlat.find(endpoint.second);
+				if (pastedFlat == newFlatBySourceFlat.end())return false;
+				joint[childKey] = pastedFlat->second;
+				if (joint.contains(posKey) && joint[posKey].is_object()) {
+					const auto p = position(joint[posKey]);
+					writePosition(joint, posKey, { translate(p.x, offset.x),translate(p.y, offset.y),translate(p.z, offset.z) });
+				}
+				auto* pastedChild = childByFlatIndex(pastedFlat->second);
+				if (!pastedChild)return false;
+				ensureJointReference(*pastedChild, joint["id"].get<std::int64_t>());
+			}
+			else {
+				joint[childKey] = endpoint.second;
+				if (endpoint.second >= 0 && endpoint.second < originalChildCount)
+					originalEndpointReferences.emplace_back(endpoint.second, joint["id"].get<std::int64_t>());
+			}
+		}
+	}
+	for (const auto& [flat, jointId] : originalEndpointReferences) {
+		json* child = childByFlatIndex(flat);
+		if (!child)return false;
+		ensureJointReference(*child, jointId);
+	}
+	if (!clonedJoints.empty()) {
+		if (!staged.contains("joints") || staged["joints"].is_null())staged["joints"] = json::array();
+		if (!staged["joints"].is_array())return false;
+		for (auto& joint : clonedJoints) {
+			stagedResult.joints.push_back((int)staged["joints"].size());
+			staged["joints"].push_back(std::move(joint));
+		}
+	}
+	blueprint = std::move(staged);
+	result = std::move(stagedResult);
 	return true;
 }
 

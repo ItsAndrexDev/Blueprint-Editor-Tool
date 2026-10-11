@@ -33,6 +33,8 @@ The editor saves directly to the selected blueprint folder. Make a backup of imp
 - Drag one of the **+X**, **-X**, **+Y**, **-Y**, **+Z**, or **-Z** arrows to move the entire selection along that axis.
 - The Inspector’s position fields and movement buttons also move the whole selection.
 - Enable **Stack selected parts at active position** in the Inspector to place all selected parts at the active part’s position. Movement keeps them together at that shared position; changing the active part updates the shared position.
+- Use **Copy** / **Paste** or **Ctrl+C** / **Ctrl+V** to duplicate selected parts and joints. Joints between two selected parts are included automatically. Part copies are selected after paste and move one additional grid unit along +X each time; their copied joints follow them.
+- Set **Copy block state (connections)** before copying. When enabled, controller settings and links are copied; links between copied parts point to their new copies, and links to unselected parts remain connected to the originals. When disabled, copied controllers reset to defaults and logic links are cleared.
 - Enable **Logic manipulation**, click a source part, then click target parts to create directed links in the viewport. Click the source itself to wire it into itself, or Shift-click another part to switch sources. Click empty viewport space to clear the source and selection. Arrows show link direction; click an arrow to remove that connection. Press Esc or disable the mode to return to normal selection and movement.
 - The cyan outline marks the active part; other selected parts have their own outlines.
 - Rotation controls edit the active part.
@@ -60,6 +62,8 @@ Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable 
 | Save the blueprint | **Ctrl+S** or **Save Blueprint** |
 | Undo the last edit | **Ctrl+Z** or **Undo** |
 | Redo an undone edit | **Ctrl+Y** or **Redo** |
+| Copy the selection | **Ctrl+C** or **Copy** |
+| Paste the copied objects | **Ctrl+V** or **Paste**; parts move along +X |
 
 ## Blueprint compatibility
 
