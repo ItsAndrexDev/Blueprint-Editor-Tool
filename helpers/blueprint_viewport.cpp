@@ -389,7 +389,7 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									if (material.contains("textures") && material["textures"].is_object() && material["textures"].contains("diffuse") && material["textures"]["diffuse"].is_string())texture = material["textures"]["diffuse"].get<std::string>();
 									else if (material.contains("textureList") && material["textureList"].is_array() && !material["textureList"].empty() && material["textureList"][0].is_string())texture = material["textureList"][0].get<std::string>();
 									if (!texture.empty()) { auto resolved = resolveGameAsset(texture); if (!resolved.empty())entry.materialTextures[lower(name)] = std::move(resolved); }
-								};
+									};
 								if (lod.contains("subMeshMap") && lod["subMeshMap"].is_object())for (auto material = lod["subMeshMap"].begin(); material != lod["subMeshMap"].end(); ++material)rememberMaterial(material.key(), material.value());
 								auto readDiffuse = [&](const json& material) {
 									std::string texture;
@@ -397,7 +397,7 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									if (material.is_object() && material.contains("textures") && material["textures"].is_object() && material["textures"].contains("diffuse") && material["textures"]["diffuse"].is_string())texture = material["textures"]["diffuse"].get<std::string>();
 									else if (material.is_object() && material.contains("textureList") && material["textureList"].is_array() && !material["textureList"].empty() && material["textureList"][0].is_string())texture = material["textureList"][0].get<std::string>();
 									if (!texture.empty())entry.diffuseTexture = resolveGameAsset(texture);
-								};
+									};
 								if (lod.contains("subMeshList") && lod["subMeshList"].is_array())for (const auto& material : lod["subMeshList"]) { readDiffuse(material); if (!entry.diffuseTexture.empty())break; }
 								if (lod.contains("subMeshList") && lod["subMeshList"].is_array())for (size_t materialIndex = 0; materialIndex < lod["subMeshList"].size(); ++materialIndex)rememberMaterial(std::to_string(materialIndex), lod["subMeshList"][materialIndex]);
 								if (entry.diffuseTexture.empty() && lod.contains("subMeshMap") && lod["subMeshMap"].is_object()) {
@@ -427,7 +427,7 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 									auto model = resolveGameAsset(lod[key].get<std::string>());
 									if (model.empty() || !std::filesystem::is_regular_file(model))return;
 									if (std::find(entry.models.begin(), entry.models.end(), model) == entry.models.end())entry.models.push_back(std::move(model));
-								};
+									};
 								// The warehouse spotlight's static mesh is only the unlit fixture. Its
 								// active pose contains the assembled lamp housing; prefer that complete
 								// model for this one part while leaving other pose-driven lights static.
@@ -595,7 +595,7 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 				point = applyFbxTransform(point, geometric);
 				for (const auto& transform : modelChain)point = applyFbxTransform(point, transform);
 				return point;
-			};
+				};
 			auto uvFor = [&](size_t polygonVertex, uint32_t vertexIndex) {
 				std::array<float, 2> uv{};
 				if (!uvValues || uvValues->arr.size() < 2)return uv;
@@ -607,7 +607,7 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 					uv[1] = 1.f - (float)uvValues->arr[(size_t)direct * 2 + 1];
 				}
 				return uv;
-			};
+				};
 			std::vector<std::pair<uint32_t, std::array<float, 2>>> poly;
 			size_t polygonVertex = 0, polygon = 0;
 			for (double d : faces->arr) {
@@ -1202,12 +1202,13 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array() || part.childIndex >= (int)body["childs"].size()) return nullptr;
 			auto& child = body["childs"][part.childIndex];
 			return child.is_object() && child.contains("controller") && child["controller"].is_object() ? &child["controller"] : nullptr;
-		};
+			};
 		auto controllerIdForPart = [&](int index) -> std::int64_t {
 			json* controller = controllerForPart(index);
 			if (!controller || !controller->contains("id") || !(*controller)["id"].is_number_integer()) return -1;
-			try { return (*controller)["id"].get<std::int64_t>(); } catch (...) { return -1; }
-		};
+			try { return (*controller)["id"].get<std::int64_t>(); }
+			catch (...) { return -1; }
+			};
 		auto partDisplayName = [&](int index) {
 			if (index < 0 || index >= (int)blocks.size())return std::string("part");
 			std::string name = Parser::findBlockNameByShapeID(blocks[index].shapeID, items);
@@ -1216,7 +1217,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				if (shape != state.catalog.end() && !shape->second.name.empty())name = displayNameFromShapeSet(shape->second.name);
 			}
 			return name.empty() || name == "Unknown part" ? std::string("part") : name;
-		};
+			};
 		if (state.logicSource < 0 || state.logicSource >= (int)blocks.size() || controllerIdForPart(state.logicSource) < 0)state.logicSource = -1;
 		auto addTurretSeatSelection = [&](int index) {
 			if (index < 0 || index >= (int)blocks.size())return;
@@ -1236,22 +1237,23 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				if (dz <= 1 && dz < nearestZ) { nearestZ = dz; mate = (int)candidate; }
 			}
 			if (mate >= 0)state.selectionSet.insert(mate);
-		};
+			};
 		auto addSelectionGroup = [&](int index) {
 			if (index < 0 || index >= (int)blocks.size())return;
 			state.selectionSet.insert(index);
 			addTurretSeatSelection(index);
-		};
+			};
 		auto synchronizeJointPositions = [&]() {
 			Parser::applyBlockListToNode(blocks, blueprint);
 			if (!blueprint.contains("joints") || !blueprint["joints"].is_array()) return;
 			auto readPosition = [](const json& value) {
 				auto component = [&](const char* key) {
 					if (!value.is_object() || !value.contains(key) || !value[key].is_number_integer()) return 0;
-					try { return value[key].get<int>(); } catch (...) { return 0; }
-				};
+					try { return value[key].get<int>(); }
+					catch (...) { return 0; }
+					};
 				return Parser::Position{ component("x"), component("y"), component("z") };
-			};
+				};
 			for (auto& block : blocks) {
 				if (!block.isJoint || block.jointIndex < 0 || block.jointIndex >= (int)blueprint["joints"].size()) continue;
 				const auto& joint = blueprint["joints"][block.jointIndex];
@@ -1260,15 +1262,15 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				block.jointPosB = readPosition(joint["posB"]);
 				block.pos = block.jointPosA;
 			}
-		};
+			};
 		auto moveSelection = [&](int x, int y, int z) {
 			if (state.selectionSet.empty() && state.selection >= 0)state.selectionSet.insert(state.selection);
-				if (state.stackSelection && state.selection >= 0 && state.selection < (int)blocks.size() && !blocks[state.selection].isJoint) {
-					const auto& active = blocks[state.selection];
-					const Parser::Position target{ active.pos.x + x,active.pos.y + y,active.pos.z + z };
-					for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
-				}
-				else for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], x, y, z);
+			if (state.stackSelection && state.selection >= 0 && state.selection < (int)blocks.size() && !blocks[state.selection].isJoint) {
+				const auto& active = blocks[state.selection];
+				const Parser::Position target{ active.pos.x + x,active.pos.y + y,active.pos.z + z };
+				for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
+			}
+			else for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], x, y, z);
 			synchronizeJointPositions();
 			};
 		auto selectedWorldSize = [&]() {
@@ -1310,7 +1312,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			state.stackSelection = false;
 			state.historyActionInProgress = false;
 			state.error.clear();
-		};
+			};
 		auto undo = [&]() { if (state.historyCursor > 0) { restoreHistory(state.historyCursor - 1); notify("Edit undone"); } };
 		auto redo = [&]() { if (state.historyCursor + 1 < state.blueprintHistory.size()) { restoreHistory(state.historyCursor + 1); notify("Edit redone"); } };
 		auto removeSelection = [&]() {
@@ -1454,7 +1456,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				if (centerMeshOnFootprint)v = v - meshCenter;
 				v.x *= sc[0]; v.y *= sc[1]; v.z *= sc[2];
 				return orient(v, b) + center;
-			};
+				};
 			if (isSelected((int)bi)) {
 				const V3 localMin = imported ? lo - (centerMeshOnFootprint ? meshCenter : V3{}) : V3{ -.5f,-.5f,-.5f };
 				const V3 localMax = imported ? hi - (centerMeshOnFootprint ? meshCenter : V3{}) : V3{ .5f,.5f,.5f };
@@ -1516,7 +1518,8 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				json* controller = controllerForPart(index);
 				if (!controller || !controller->contains("controllers") || !(*controller)["controllers"].is_array())continue;
 				for (const auto& connection : (*controller)["controllers"])if (connection.is_object() && connection.contains("id") && connection["id"].is_number_integer())
-					try { targetsByControllerId[id].insert(connection["id"].get<std::int64_t>()); } catch (...) {}
+					try { targetsByControllerId[id].insert(connection["id"].get<std::int64_t>()); }
+				catch (...) {}
 			}
 			std::vector<ImVec2> partScreen(blocks.size());
 			for (size_t index = 0; index < blocks.size(); ++index) { float depth; partScreen[index] = screen(blockCenter(blocks[index]), depth); }
@@ -1542,7 +1545,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 							const float c = 3.f * oneMinusT * t * t;
 							const float d = t * t * t;
 							loop.emplace_back(a * start.x + b * controlA.x + c * controlB.x + d * end.x,
-								 a * start.y + b * controlA.y + c * controlB.y + d * end.y);
+								a * start.y + b * controlA.y + c * controlB.y + d * end.y);
 						}
 						logicEdges.push_back({ source,target,targetId,std::move(loop) });
 						continue;
@@ -1604,29 +1607,29 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			}
 
 			if (!state.logicManipulation) {
-			const ImU32 colors[3] = { IM_COL32(255,112,112,255),IM_COL32(120,235,155,255),IM_COL32(115,175,255,255) };
-			const char* positive[3] = { "+X","+Y","+Z" }; const char* negative[3] = { "-X","-Y","-Z" };
-			auto drawArrow = [&](ImVec2 from, ImVec2 to, ImU32 color, const char* label, int signedAxis) {
-				const float dx = to.x - from.x, dy = to.y - from.y, len = std::sqrt(dx * dx + dy * dy); if (len < 8.f)return;
-				const bool active = state.dragAxis == signedAxis, hot = hoveredAxis == signedAxis;
-				const ImU32 visible = active ? IM_COL32(255, 245, 115, 255) : hot ? IM_COL32(255, 255, 255, 255) : color;
-				const float ux = dx / len, uy = dy / len, head = std::min(9.f, len * .34f), wing = 4.5f;
-				dl->AddLine(from, to, IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
-				dl->AddLine(from, to, visible, active ? 4.f : hot ? 3.5f : 2.5f);
-				dl->AddLine(to, ImVec2(to.x - ux * head - uy * wing, to.y - uy * head + ux * wing), IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
-				dl->AddLine(to, ImVec2(to.x - ux * head - uy * wing, to.y - uy * head + ux * wing), visible, active ? 4.f : hot ? 3.5f : 2.5f);
-				dl->AddLine(to, ImVec2(to.x - ux * head + uy * wing, to.y - uy * head - ux * wing), IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
-				dl->AddLine(to, ImVec2(to.x - ux * head + uy * wing, to.y - uy * head - ux * wing), visible, active ? 4.f : hot ? 3.5f : 2.5f);
-				const ImVec2 labelPos(to.x + ux * 7.f - 10.f, to.y + uy * 7.f - 8.f);
-				dl->AddText(ImVec2(labelPos.x + 1, labelPos.y + 1), IM_COL32(0, 0, 0, 255), label);
-				dl->AddText(labelPos, visible, label);
-				};
-			for (int i = 0; i < 3; i++) {
-				const AxisHandle positiveHandle = getAxisHandle(i + 1), negativeHandle = getAxisHandle(-(i + 1));
-				drawArrow(positiveHandle.center, positiveHandle.end, colors[i], positive[i], i + 1);
-				drawArrow(negativeHandle.center, negativeHandle.end, colors[i], negative[i], -(i + 1));
-			}
-			if (state.dragAxis) { const int a = std::abs(state.dragAxis) - 1; const char* names[3] = { "X","Y","Z" }; char indicator[64]; snprintf(indicator, sizeof(indicator), "MOVING  %c%s  ·  drag along this axis", state.dragAxis > 0 ? '+' : '-', names[a]); dl->AddRectFilled(ImVec2(origin.x + 12, origin.y + 12), ImVec2(origin.x + 230, origin.y + 40), IM_COL32(16, 20, 26, 235), 5.f); dl->AddText(ImVec2(origin.x + 21, origin.y + 19), IM_COL32(255, 245, 115, 255), indicator); }
+				const ImU32 colors[3] = { IM_COL32(255,112,112,255),IM_COL32(120,235,155,255),IM_COL32(115,175,255,255) };
+				const char* positive[3] = { "+X","+Y","+Z" }; const char* negative[3] = { "-X","-Y","-Z" };
+				auto drawArrow = [&](ImVec2 from, ImVec2 to, ImU32 color, const char* label, int signedAxis) {
+					const float dx = to.x - from.x, dy = to.y - from.y, len = std::sqrt(dx * dx + dy * dy); if (len < 8.f)return;
+					const bool active = state.dragAxis == signedAxis, hot = hoveredAxis == signedAxis;
+					const ImU32 visible = active ? IM_COL32(255, 245, 115, 255) : hot ? IM_COL32(255, 255, 255, 255) : color;
+					const float ux = dx / len, uy = dy / len, head = std::min(9.f, len * .34f), wing = 4.5f;
+					dl->AddLine(from, to, IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
+					dl->AddLine(from, to, visible, active ? 4.f : hot ? 3.5f : 2.5f);
+					dl->AddLine(to, ImVec2(to.x - ux * head - uy * wing, to.y - uy * head + ux * wing), IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
+					dl->AddLine(to, ImVec2(to.x - ux * head - uy * wing, to.y - uy * head + ux * wing), visible, active ? 4.f : hot ? 3.5f : 2.5f);
+					dl->AddLine(to, ImVec2(to.x - ux * head + uy * wing, to.y - uy * head - ux * wing), IM_COL32(10, 13, 18, 230), active ? 7.f : 5.f);
+					dl->AddLine(to, ImVec2(to.x - ux * head + uy * wing, to.y - uy * head - ux * wing), visible, active ? 4.f : hot ? 3.5f : 2.5f);
+					const ImVec2 labelPos(to.x + ux * 7.f - 10.f, to.y + uy * 7.f - 8.f);
+					dl->AddText(ImVec2(labelPos.x + 1, labelPos.y + 1), IM_COL32(0, 0, 0, 255), label);
+					dl->AddText(labelPos, visible, label);
+					};
+				for (int i = 0; i < 3; i++) {
+					const AxisHandle positiveHandle = getAxisHandle(i + 1), negativeHandle = getAxisHandle(-(i + 1));
+					drawArrow(positiveHandle.center, positiveHandle.end, colors[i], positive[i], i + 1);
+					drawArrow(negativeHandle.center, negativeHandle.end, colors[i], negative[i], -(i + 1));
+				}
+				if (state.dragAxis) { const int a = std::abs(state.dragAxis) - 1; const char* names[3] = { "X","Y","Z" }; char indicator[64]; snprintf(indicator, sizeof(indicator), "MOVING  %c%s  ·  drag along this axis", state.dragAxis > 0 ? '+' : '-', names[a]); dl->AddRectFilled(ImVec2(origin.x + 12, origin.y + 12), ImVec2(origin.x + 230, origin.y + 40), IM_COL32(16, 20, 26, 235), 5.f); dl->AddText(ImVec2(origin.x + 21, origin.y + 19), IM_COL32(255, 245, 115, 255), indicator); }
 			}
 		}
 		if (state.logicManipulation) {
@@ -1780,7 +1783,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			else if (b.isJoint)ImGui::TextDisabled("Joint %d  ·  render pivot at attachment A", b.jointIndex + 1);
 			else ImGui::TextDisabled("Part %d of %d  ·  body %d", state.selection + 1, (int)blocks.size(), b.bodyIndex + 1);
 			if (multiSelection && !b.isJoint) {
-				if (ImGui::Checkbox("Stack selected parts at active position", &state.stackSelection) && state.stackSelection) {
+				if (ImGui::Button("Stack selected parts at active position")) {
 					const Parser::Position target = b.pos;
 					for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
 					synchronizeJointPositions();
