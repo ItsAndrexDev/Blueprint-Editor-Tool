@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstdint>
 #include <string>
@@ -48,6 +49,8 @@ Block parseBlock(const json& block, int bodyIndex, int childIndex);
 void applyBlockListToNode(const std::vector<Block>& blocks, json& blueprint);
 bool removeBlockFromNode(json& blueprint, int bodyIndex, int childIndex);
 bool removeJointFromNode(json& blueprint, int jointIndex);
+bool addDirectedConnection(json& blueprint, const std::vector<Block>& blocks, int sourceIndex, int targetIndex);
+bool removeConnectionById(json& blueprint, const std::vector<Block>& blocks, int sourceIndex, std::int64_t targetControllerId);
 bool saveBlueprint(const std::string& filepath, const json& blueprint);
 std::string findBlockNameByShapeID(const std::string& shapeID, const json& items);
 std::string findShapeIDByBlockName(const std::string& blockName, const json& items);

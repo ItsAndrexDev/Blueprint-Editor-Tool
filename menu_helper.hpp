@@ -114,6 +114,8 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("The game uses Z as up. The arrow you pull controls the only direction of movement.");
 	ImGui::BulletText("For block dimensions, local Z is Height and local Y is Depth. Orientation controls label the upright axis as local Z.");
 	ImGui::BulletText("Position fields, movement buttons, and axis arrows move the whole selection. Rotation edits the active part. Color changes apply to every selected part.");
+	ImGui::BulletText("In the Inspector, enable Stack selected parts at active position to place selected parts together. Movement keeps them stacked, and the active part sets their shared position.");
+	ImGui::BulletText("Enable Logic manipulation and click a source part, then click targets to add directed connections. Click the source itself to wire it into itself, or Shift-click a different part to switch sources. Click empty viewport space to clear the source and selection. Visible arrows show connection direction; click an arrow to remove that link. Press Esc or disable the mode to return to normal selection and movement.");
 	ImGui::BulletText("With one part selected, Dimensions lets you resize built-in blocks. With multiple parts selected, it shows their combined world-space Width (X), Depth (Y), and Height (Z).");
 	ImGui::BulletText("Press Delete to remove all selected parts.");
 	ImGui::BulletText("Use Undo or Ctrl+Z to undo an edit, and Redo or Ctrl+Y to restore it. Undo history is kept in the editor until you switch blueprints; save to write the current state to disk.");

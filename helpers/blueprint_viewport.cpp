@@ -55,6 +55,9 @@ namespace BlueprintViewport {
 			std::filesystem::path currentBlueprint;
 			int selection = -1;
 			std::unordered_set<int> selectionSet;
+			bool stackSelection{};
+			bool logicManipulation{};
+			int logicSource = -1;
 			std::vector<int> dragSelection;
 			// Keep the default camera on the same side of the creation as the game
 			// blueprint preview; the opposite yaw reflects asymmetric builds in top view.
@@ -747,15 +750,15 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 			std::string diagnostic;
 			for (std::sregex_iterator geometryIt(xml.begin(), xml.end(), geometryPattern), end; geometryIt != end; ++geometryIt) {
 				const std::string geometry = (*geometryIt)[2].str();
-				std::unordered_map<std::string, std::vector<double>> positions;
+				std::unordered_map<std::string, std::vector<double>> sources;
 				for (std::sregex_iterator sourceIt(geometry.begin(), geometry.end(), sourcePattern); sourceIt != end; ++sourceIt) {
 					const std::string id = xmlAttribute((*sourceIt)[1].str(), "id");
 					if (id.empty())continue;
 					const std::string floats = xmlElementText((*sourceIt)[2].str(), "float_array");
 					if (floats.empty())continue;
 					std::vector<double> values;
-					if (parseXmlNumbers(floats, values, maximumVertices * 3) && values.size() >= 9 && values.size() % 3 == 0)
-						positions.emplace(id, std::move(values));
+					if (parseXmlNumbers(floats, values, maximumVertices * 3) && values.size() >= 2)
+						sources.emplace(id, std::move(values));
 				}
 
 				std::unordered_map<std::string, std::string> vertexPositions;
@@ -772,13 +775,12 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 					}
 				}
 
-				std::unordered_map<std::string, uint32_t> sourceBases;
 				for (std::sregex_iterator primitiveIt(geometry.begin(), geometry.end(), primitivePattern); primitiveIt != end; ++primitiveIt) {
 					const std::string kind = (*primitiveIt)[1].str();
 					const std::string primitive = (*primitiveIt)[3].str();
 					const std::string inputs = primitive;
-					int tupleStride = 0, positionOffset = -1;
-					std::string positionSource;
+					int tupleStride = 0, positionOffset = -1, uvOffset = -1;
+					std::string positionSource, uvSource;
 					for (std::sregex_iterator inputIt(inputs.begin(), inputs.end(), inputPattern); inputIt != end; ++inputIt) {
 						const std::string inputAttributes = (*inputIt)[1].str();
 						const std::string semantic = xmlAttribute(inputAttributes, "semantic");
@@ -787,6 +789,12 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 						if (!offsetText.empty()) { try { offset = std::stoi(offsetText); } catch (...) { offset = -1; } }
 						if (offset < 0 || offset >= 32)continue;
 						tupleStride = std::max(tupleStride, offset + 1);
+						if (semantic == "TEXCOORD" && (uvOffset < 0 || xmlAttribute(inputAttributes, "set") == "0")) {
+							std::string sourceId = xmlAttribute(inputAttributes, "source");
+							if (!sourceId.empty() && sourceId.front() == '#')sourceId.erase(sourceId.begin());
+							if (sources.contains(sourceId)) { uvOffset = offset; uvSource = std::move(sourceId); }
+							continue;
+						}
 						if (semantic != "VERTEX" && semantic != "POSITION")continue;
 						std::string sourceId = xmlAttribute(inputAttributes, "source");
 						if (!sourceId.empty() && sourceId.front() == '#')sourceId.erase(sourceId.begin());
@@ -795,37 +803,50 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 							if (vertexSource == vertexPositions.end())continue;
 							sourceId = vertexSource->second;
 						}
-						if (positionOffset < 0 && positions.contains(sourceId)) { positionOffset = offset; positionSource = std::move(sourceId); }
+						if (positionOffset < 0 && sources.contains(sourceId) && sources[sourceId].size() % 3 == 0) { positionOffset = offset; positionSource = std::move(sourceId); }
 					}
 					if (tupleStride <= 0 || positionOffset < 0) { diagnostic = "COLLADA primitive has no supported position input"; continue; }
-					const auto positionIt = positions.find(positionSource);
-					if (positionIt == positions.end())continue;
-					auto baseIt = sourceBases.find(positionSource);
-					if (baseIt == sourceBases.end()) {
-						const auto& points = positionIt->second;
-						if (points.size() / 3 > maximumVertices - mesh.vertices.size()) { mesh.detail = "COLLADA mesh exceeds the 500,000 vertex viewer limit"; return false; }
-						const uint32_t base = static_cast<uint32_t>(mesh.vertices.size());
-						for (size_t i = 0; i + 2 < points.size(); i += 3)mesh.vertices.push_back({ (float)points[i],(float)points[i + 1],(float)points[i + 2] });
-						baseIt = sourceBases.emplace(positionSource, base).first;
-					}
-					const uint32_t base = baseIt->second;
+					const auto positionIt = sources.find(positionSource);
+					if (positionIt == sources.end())continue;
+					const auto uvIt = uvSource.empty() ? sources.end() : sources.find(uvSource);
+					std::unordered_map<uint64_t, uint32_t> primitiveVertices;
 					for (std::sregex_iterator pIt(primitive.begin(), primitive.end(), pPattern); pIt != end; ++pIt) {
 						std::vector<double> rawIndices;
 						if (!parseXmlNumbers((*pIt)[1].str(), rawIndices, maximumIndices * 4ull)) { diagnostic = "COLLADA primitive has invalid index data"; continue; }
 						if (rawIndices.size() % (size_t)tupleStride != 0) { diagnostic = "COLLADA primitive index tuple is truncated"; continue; }
-						std::vector<uint32_t> positionIndices;
-						positionIndices.reserve(rawIndices.size() / (size_t)tupleStride);
+						std::vector<uint32_t> primitiveIndices;
+						primitiveIndices.reserve(rawIndices.size() / (size_t)tupleStride);
 						bool valid = true;
-						for (size_t i = (size_t)positionOffset; i < rawIndices.size(); i += (size_t)tupleStride) {
-							const double value = rawIndices[i];
-							if (value < 0 || value >= positionIt->second.size() / 3 || std::floor(value) != value) { valid = false; break; }
-							positionIndices.push_back((uint32_t)value);
+						for (size_t tuple = 0; tuple < rawIndices.size() / (size_t)tupleStride; ++tuple) {
+							const size_t at = tuple * (size_t)tupleStride;
+							const double positionValue = rawIndices[at + (size_t)positionOffset];
+							if (positionValue < 0 || positionValue >= positionIt->second.size() / 3 || std::floor(positionValue) != positionValue) { valid = false; break; }
+							const uint32_t positionIndex = (uint32_t)positionValue;
+							uint32_t uvIndex = 0;
+							if (uvOffset >= 0 && uvIt != sources.end()) {
+								const double uvValue = rawIndices[at + (size_t)uvOffset];
+								if (uvValue < 0 || uvValue >= uvIt->second.size() / 2 || std::floor(uvValue) != uvValue) { valid = false; break; }
+								uvIndex = (uint32_t)uvValue;
+							}
+							const uint64_t key = ((uint64_t)positionIndex << 32) | uvIndex;
+							auto vertex = primitiveVertices.find(key);
+							if (vertex == primitiveVertices.end()) {
+								if (mesh.vertices.size() >= maximumVertices) { mesh.detail = "COLLADA mesh exceeds the 500,000 vertex viewer limit"; return false; }
+								const size_t p = (size_t)positionIndex * 3;
+								const uint32_t newIndex = (uint32_t)mesh.vertices.size();
+								mesh.vertices.push_back({ (float)positionIt->second[p],(float)positionIt->second[p + 1],(float)positionIt->second[p + 2] });
+								std::array<float, 2> uv{};
+								if (uvOffset >= 0 && uvIt != sources.end()) { const size_t u = (size_t)uvIndex * 2; uv = { (float)uvIt->second[u], 1.f - (float)uvIt->second[u + 1] }; }
+								mesh.uvs.push_back(uv);
+								vertex = primitiveVertices.emplace(key, newIndex).first;
+							}
+							primitiveIndices.push_back(vertex->second);
 						}
 						if (!valid) { diagnostic = "COLLADA primitive references an invalid position"; continue; }
 						if (kind == "triangles") {
-							if (positionIndices.size() % 3 != 0) { diagnostic = "COLLADA triangle list is incomplete"; continue; }
-							if (positionIndices.size() > maximumIndices - mesh.indices.size()) { mesh.detail = "COLLADA mesh exceeds the 1,500,000 index viewer limit"; return false; }
-							for (uint32_t index : positionIndices)mesh.indices.push_back(base + index);
+							if (primitiveIndices.size() % 3 != 0) { diagnostic = "COLLADA triangle list is incomplete"; continue; }
+							if (primitiveIndices.size() > maximumIndices - mesh.indices.size()) { mesh.detail = "COLLADA mesh exceeds the 1,500,000 index viewer limit"; return false; }
+							mesh.indices.insert(mesh.indices.end(), primitiveIndices.begin(), primitiveIndices.end());
 						}
 						else {
 							std::smatch vcountMatch;
@@ -834,13 +855,13 @@ void main(){vec4 texel=uTextured?texture(uDiffuse,vUv):vec4(1.0);outColor=vec4(v
 							if (!parseXmlNumbers(vcountMatch[1].str(), counts, maximumIndices)) { diagnostic = "COLLADA polygon list has invalid vertex counts"; continue; }
 							size_t at = 0;
 							for (double countValue : counts) {
-								if (countValue < 3 || countValue > positionIndices.size() - at || std::floor(countValue) != countValue) { valid = false; break; }
+								if (countValue < 3 || countValue > primitiveIndices.size() - at || std::floor(countValue) != countValue) { valid = false; break; }
 								const size_t count = (size_t)countValue;
 								if ((count - 2) * 3 > maximumIndices - mesh.indices.size()) { mesh.detail = "COLLADA mesh exceeds the 1,500,000 index viewer limit"; return false; }
-								for (size_t k = 1; k + 1 < count; k++)mesh.indices.insert(mesh.indices.end(), { base + positionIndices[at],base + positionIndices[at + k],base + positionIndices[at + k + 1] });
+								for (size_t k = 1; k + 1 < count; k++)mesh.indices.insert(mesh.indices.end(), { primitiveIndices[at],primitiveIndices[at + k],primitiveIndices[at + k + 1] });
 								at += count;
 							}
-							if (!valid || at != positionIndices.size())diagnostic = "COLLADA polygon counts do not match its indices";
+							if (!valid || at != primitiveIndices.size())diagnostic = "COLLADA polygon counts do not match its indices";
 						}
 					}
 				}
@@ -1168,11 +1189,35 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		std::vector<Parser::Block>& blocks, const json& items,
 		const std::string& blueprintName, bool& backToSelectionRequested) {
 		loadCatalog();
-		if (state.currentBlueprint != blueprintPath) { state.meshes.clear(); state.meshFiles.clear(); state.meshCacheBytes = 0; state.currentBlueprint = blueprintPath; state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0; state.pan = { 0,0 }; state.zoom = 1.f; state.blueprintHistory.clear(); state.blueprintHistory.push_back(blueprint); Parser::applyBlockListToNode(blocks, state.blueprintHistory.back()); state.historyCursor = 0; state.historyActionInProgress = false; }
+		if (state.currentBlueprint != blueprintPath) { state.meshes.clear(); state.meshFiles.clear(); state.meshCacheBytes = 0; state.currentBlueprint = blueprintPath; state.selection = -1; state.selectionSet.clear(); state.stackSelection = false; state.logicManipulation = false; state.logicSource = -1; state.dragSelection.clear(); state.dragAxis = 0; state.pan = { 0,0 }; state.zoom = 1.f; state.blueprintHistory.clear(); state.blueprintHistory.push_back(blueprint); Parser::applyBlockListToNode(blocks, state.blueprintHistory.back()); state.historyCursor = 0; state.historyActionInProgress = false; }
 		for (auto it = state.selectionSet.begin(); it != state.selectionSet.end();)if (*it < 0 || *it >= (int)blocks.size())it = state.selectionSet.erase(it); else ++it;
 		if (state.selection < 0 || state.selection >= (int)blocks.size())state.selection = -1;
 		if (state.selection >= 0)state.selectionSet.insert(state.selection);
 		auto isSelected = [&](int index) {return index == state.selection || state.selectionSet.contains(index); };
+		auto controllerForPart = [&](int index) -> json* {
+			if (index < 0 || index >= (int)blocks.size() || blocks[index].isJoint) return nullptr;
+			const auto& part = blocks[index];
+			if (part.bodyIndex < 0 || part.childIndex < 0 || !blueprint.is_object() || !blueprint.contains("bodies") || !blueprint["bodies"].is_array() || part.bodyIndex >= (int)blueprint["bodies"].size()) return nullptr;
+			auto& body = blueprint["bodies"][part.bodyIndex];
+			if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array() || part.childIndex >= (int)body["childs"].size()) return nullptr;
+			auto& child = body["childs"][part.childIndex];
+			return child.is_object() && child.contains("controller") && child["controller"].is_object() ? &child["controller"] : nullptr;
+		};
+		auto controllerIdForPart = [&](int index) -> std::int64_t {
+			json* controller = controllerForPart(index);
+			if (!controller || !controller->contains("id") || !(*controller)["id"].is_number_integer()) return -1;
+			try { return (*controller)["id"].get<std::int64_t>(); } catch (...) { return -1; }
+		};
+		auto partDisplayName = [&](int index) {
+			if (index < 0 || index >= (int)blocks.size())return std::string("part");
+			std::string name = Parser::findBlockNameByShapeID(blocks[index].shapeID, items);
+			if (name.empty() || name == "Unknown part") {
+				auto shape = state.catalog.find(lower(blocks[index].shapeID));
+				if (shape != state.catalog.end() && !shape->second.name.empty())name = displayNameFromShapeSet(shape->second.name);
+			}
+			return name.empty() || name == "Unknown part" ? std::string("part") : name;
+		};
+		if (state.logicSource < 0 || state.logicSource >= (int)blocks.size() || controllerIdForPart(state.logicSource) < 0)state.logicSource = -1;
 		auto addTurretSeatSelection = [&](int index) {
 			if (index < 0 || index >= (int)blocks.size())return;
 			const auto& part = blocks[index];
@@ -1218,7 +1263,12 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		};
 		auto moveSelection = [&](int x, int y, int z) {
 			if (state.selectionSet.empty() && state.selection >= 0)state.selectionSet.insert(state.selection);
-			for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], x, y, z);
+				if (state.stackSelection && state.selection >= 0 && state.selection < (int)blocks.size() && !blocks[state.selection].isJoint) {
+					const auto& active = blocks[state.selection];
+					const Parser::Position target{ active.pos.x + x,active.pos.y + y,active.pos.z + z };
+					for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
+				}
+				else for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], x, y, z);
 			synchronizeJointPositions();
 			};
 		auto selectedWorldSize = [&]() {
@@ -1257,6 +1307,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			blueprint = state.blueprintHistory[cursor];
 			blocks = Parser::parseBlueprint(blueprint);
 			state.selection = -1; state.selectionSet.clear(); state.dragSelection.clear(); state.dragAxis = 0;
+			state.stackSelection = false;
 			state.historyActionInProgress = false;
 			state.error.clear();
 		};
@@ -1284,6 +1335,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))undo();
 		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false))redo();
 		else if (shortcutReady && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))saveBlueprint();
+		if (shortcutReady && state.logicManipulation && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) { state.logicManipulation = false; state.logicSource = -1; notify("Logic manipulation disabled"); }
 		if (shortcutReady && ImGui::IsKeyPressed(ImGuiKey_Delete, false))removeSelection();
 		ImGui::TextWrapped("Editing: %s", blueprintName.c_str());
 		if (ImGui::Button("Back to Selection"))backToSelectionRequested = true;
@@ -1293,6 +1345,22 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor == 0); if (ImGui::Button("Undo"))undo(); ImGui::EndDisabled();
 		ImGui::SameLine(); ImGui::BeginDisabled(state.historyCursor + 1 >= state.blueprintHistory.size()); if (ImGui::Button("Redo"))redo(); ImGui::EndDisabled();
 		ImGui::SameLine(); if (ImGui::Button("Reset view")) { state.yaw = .72f; state.pitch = .42f; state.zoom = 1.f; state.pan = { 0,0 }; notify("View reset"); }
+		ImGui::Spacing();
+		const bool logicButtonWasActive = state.logicManipulation;
+		if (logicButtonWasActive) {
+			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.13f, .43f, .48f, 1.f));
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.17f, .53f, .58f, 1.f));
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.10f, .36f, .41f, 1.f));
+		}
+		if (ImGui::Button(state.logicManipulation ? "Disable Logic manipulation" : "Enable Logic manipulation")) {
+			state.logicManipulation = !state.logicManipulation;
+			state.logicSource = -1;
+			state.dragSelection.clear(); state.dragAxis = 0;
+			notify(state.logicManipulation ? "Logic manipulation enabled" : "Logic manipulation disabled");
+		}
+		if (state.logicManipulation)ImGui::SameLine();
+		if (state.logicManipulation)ImGui::TextWrapped("Click a source, then targets. Click the source again to wire it into itself. Shift-click to switch sources; click empty space to clear selection. Click an arrow to remove a link. Esc exits.");
+		if (logicButtonWasActive) ImGui::PopStyleColor(3);
 		float avail = ImGui::GetContentRegionAvail().x; float inspector = std::clamp(avail * .25f, 230.f, 330.f);
 		ImGui::BeginChild("BlueprintViewport", ImVec2(std::max(120.f, avail - inspector - 8), 0), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		ImVec2 origin = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail(); size.x = std::max(size.x, 120.f); size.y = std::max(size.y, 120.f);
@@ -1435,6 +1503,64 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			dl->AddText(ImVec2(message.x + 9.f, message.y + 9.f), IM_COL32(255, 205, 170, 255), "3D depth renderer could not start; see viewer diagnostics in the inspector.");
 		}
 		if (coarsePreview) { const ImVec2 label{ origin.x + std::max(12.f,size.x - 390.f),origin.y + 12.f }; dl->AddRectFilled(label, ImVec2(label.x + 378.f, label.y + 28.f), IM_COL32(16, 20, 26, 235), 5.f); dl->AddText(ImVec2(label.x + 8.f, label.y + 7.f), IM_COL32(255, 210, 135, 255), "Large creation: real meshes shown at reduced detail."); }
+		struct LogicEdge { int source{}, target{}; std::int64_t targetId{}; std::vector<ImVec2> path; };
+		std::vector<LogicEdge> logicEdges;
+		ImVec2 logicHintMin{}, logicHintMax{};
+		if (state.logicManipulation) {
+			std::unordered_map<std::int64_t, int> partByControllerId;
+			std::unordered_map<std::int64_t, std::unordered_set<std::int64_t>> targetsByControllerId;
+			for (int index = 0; index < (int)blocks.size(); ++index) {
+				const auto id = controllerIdForPart(index);
+				if (id < 0)continue;
+				partByControllerId.emplace(id, index);
+				json* controller = controllerForPart(index);
+				if (!controller || !controller->contains("controllers") || !(*controller)["controllers"].is_array())continue;
+				for (const auto& connection : (*controller)["controllers"])if (connection.is_object() && connection.contains("id") && connection["id"].is_number_integer())
+					try { targetsByControllerId[id].insert(connection["id"].get<std::int64_t>()); } catch (...) {}
+			}
+			std::vector<ImVec2> partScreen(blocks.size());
+			for (size_t index = 0; index < blocks.size(); ++index) { float depth; partScreen[index] = screen(blockCenter(blocks[index]), depth); }
+			for (int source = 0; source < (int)blocks.size(); ++source) {
+				const std::int64_t sourceId = controllerIdForPart(source);
+				auto outgoing = targetsByControllerId.find(sourceId);
+				if (outgoing == targetsByControllerId.end())continue;
+				for (std::int64_t targetId : outgoing->second) {
+					auto targetPart = partByControllerId.find(targetId);
+					if (targetPart == partByControllerId.end())continue;
+					const int target = targetPart->second;
+					if (target == source) {
+						const ImVec2 center = partScreen[source];
+						const ImVec2 start(center.x + 8.f, center.y - 5.f);
+						const ImVec2 controlA(center.x + 43.f, center.y - 47.f);
+						const ImVec2 controlB(center.x - 43.f, center.y - 47.f);
+						const ImVec2 end(center.x - 8.f, center.y - 5.f);
+						std::vector<ImVec2> loop; loop.reserve(21);
+						for (int step = 0; step <= 20; ++step) {
+							const float t = step / 20.f, oneMinusT = 1.f - t;
+							const float a = oneMinusT * oneMinusT * oneMinusT;
+							const float b = 3.f * oneMinusT * oneMinusT * t;
+							const float c = 3.f * oneMinusT * t * t;
+							const float d = t * t * t;
+							loop.emplace_back(a * start.x + b * controlA.x + c * controlB.x + d * end.x,
+								 a * start.y + b * controlA.y + c * controlB.y + d * end.y);
+						}
+						logicEdges.push_back({ source,target,targetId,std::move(loop) });
+						continue;
+					}
+					float dx = partScreen[target].x - partScreen[source].x, dy = partScreen[target].y - partScreen[source].y;
+					const float length = std::sqrt(dx * dx + dy * dy);
+					if (length < 18.f)continue;
+					const float ux = dx / length, uy = dy / length;
+					auto reverse = targetsByControllerId.find(targetId);
+					const bool reciprocal = reverse != targetsByControllerId.end() && reverse->second.contains(sourceId);
+					const float side = reciprocal ? 4.f : 0.f;
+					const float ox = -uy * side, oy = ux * side;
+					logicEdges.push_back({ source,target,targetId,{
+						{ partScreen[source].x + ux * 8.f + ox,partScreen[source].y + uy * 8.f + oy },
+						{ partScreen[target].x - ux * 15.f + ox,partScreen[target].y - uy * 15.f + oy } } });
+				}
+			}
+		}
 		struct AxisHandle { ImVec2 center{}, end{}, screenAxis{}; float worldPerPixel{}; };
 		auto getAxisHandle = [&](int signedAxis) {
 			AxisHandle handle; float centerDepth, axisDepth;
@@ -1455,7 +1581,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			return handle;
 			};
 		auto axisAtMouse = [&](ImVec2 point) {
-			if (!hasSelectedOutline || state.selection < 0 || state.selection >= (int)blocks.size() || blocks[state.selection].isJoint)return 0;
+			if (state.logicManipulation || !hasSelectedOutline || state.selection < 0 || state.selection >= (int)blocks.size() || blocks[state.selection].isJoint)return 0;
 			int hitAxis = 0; float nearest = 12.f;
 			for (int a = 1; a <= 3; a++)for (int sign : {-1, 1}) {
 				const int signedAxis = a * sign; const AxisHandle handle = getAxisHandle(signedAxis);
@@ -1477,6 +1603,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				for (const auto& edge : edges)dl->AddLine(selectionOutline.second[edge[0]], selectionOutline.second[edge[1]], outlineColor, active ? 2.f : 1.7f);
 			}
 
+			if (!state.logicManipulation) {
 			const ImU32 colors[3] = { IM_COL32(255,112,112,255),IM_COL32(120,235,155,255),IM_COL32(115,175,255,255) };
 			const char* positive[3] = { "+X","+Y","+Z" }; const char* negative[3] = { "-X","-Y","-Z" };
 			auto drawArrow = [&](ImVec2 from, ImVec2 to, ImU32 color, const char* label, int signedAxis) {
@@ -1500,9 +1627,72 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				drawArrow(negativeHandle.center, negativeHandle.end, colors[i], negative[i], -(i + 1));
 			}
 			if (state.dragAxis) { const int a = std::abs(state.dragAxis) - 1; const char* names[3] = { "X","Y","Z" }; char indicator[64]; snprintf(indicator, sizeof(indicator), "MOVING  %c%s  ·  drag along this axis", state.dragAxis > 0 ? '+' : '-', names[a]); dl->AddRectFilled(ImVec2(origin.x + 12, origin.y + 12), ImVec2(origin.x + 230, origin.y + 40), IM_COL32(16, 20, 26, 235), 5.f); dl->AddText(ImVec2(origin.x + 21, origin.y + 19), IM_COL32(255, 245, 115, 255), indicator); }
+			}
 		}
-		if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+		if (state.logicManipulation) {
+			dl->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
+			for (const auto& edge : logicEdges) {
+				if (edge.path.size() < 2)continue;
+				const ImVec2 from = edge.path.front(), to = edge.path.back();
+				const size_t tangentOffset = std::min<size_t>(4, edge.path.size() - 1);
+				const ImVec2 previous = edge.path[edge.path.size() - 1 - tangentOffset];
+				const float dx = to.x - previous.x, dy = to.y - previous.y, length = std::sqrt(dx * dx + dy * dy);
+				if (length < 8.f)continue;
+				const float ux = dx / length, uy = dy / length, head = std::min(11.f, length * .38f), wing = 5.5f;
+				const ImU32 color = edge.source == state.logicSource ? IM_COL32(255, 190, 76, 255) : IM_COL32(83, 222, 235, 245);
+				const ImVec2 left(to.x - ux * head - uy * wing, to.y - uy * head + ux * wing);
+				const ImVec2 right(to.x - ux * head + uy * wing, to.y - uy * head - ux * wing);
+				for (size_t point = 1; point < edge.path.size(); ++point) {
+					dl->AddLine(edge.path[point - 1], edge.path[point], IM_COL32(10, 16, 22, 235), 7.f);
+					dl->AddLine(edge.path[point - 1], edge.path[point], color, 3.f);
+				}
+				dl->AddLine(to, left, IM_COL32(10, 16, 22, 245), 7.f); dl->AddLine(to, left, color, 3.f);
+				dl->AddLine(to, right, IM_COL32(10, 16, 22, 245), 7.f); dl->AddLine(to, right, color, 3.f);
+				dl->AddCircleFilled(from, 5.f, IM_COL32(10, 16, 22, 245)); dl->AddCircleFilled(from, 2.8f, color);
+			}
+			if (state.logicSource >= 0 && state.logicSource < (int)blocks.size()) {
+				float sourceDepth;
+				const ImVec2 sourcePoint = screen(blockCenter(blocks[state.logicSource]), sourceDepth);
+				dl->AddCircle(sourcePoint, 12.f, IM_COL32(18, 24, 30, 255), 20, 4.f);
+				dl->AddCircle(sourcePoint, 10.f, IM_COL32(255, 190, 76, 255), 20, 2.f);
+				dl->AddCircleFilled(sourcePoint, 3.f, IM_COL32(255, 220, 145, 255));
+				if (hovered) {
+					const float dx = mouse.x - sourcePoint.x, dy = mouse.y - sourcePoint.y, length = std::sqrt(dx * dx + dy * dy);
+					if (length > 18.f) {
+						const float ux = dx / length, uy = dy / length;
+						for (float at = 14.f; at < length - 8.f; at += 12.f)dl->AddLine(ImVec2(sourcePoint.x + ux * at, sourcePoint.y + uy * at), ImVec2(sourcePoint.x + ux * std::min(at + 6.f, length - 8.f), sourcePoint.y + uy * std::min(at + 6.f, length - 8.f)), IM_COL32(255, 190, 76, 190), 2.f);
+						dl->AddCircleFilled(mouse, 4.f, IM_COL32(255, 190, 76, 230));
+					}
+				}
+			}
+			dl->PopClipRect();
+			std::string guidance = state.logicSource >= 0
+				? "LOGIC SOURCE: part " + std::to_string(state.logicSource + 1) + "  ·  click targets  ·  Shift-click changes source  ·  empty space clears selection  ·  arrows remove  ·  Esc exits"
+				: "LOGIC MODE  ·  click source, then targets  ·  click source to wire into itself  ·  arrows remove  ·  Esc exits";
+			const float hintWrapWidth = std::max(80.f, size.x - 36.f);
+			const ImVec2 labelSize = ImGui::CalcTextSize(guidance.c_str(), nullptr, false, hintWrapWidth);
+			const ImVec2 labelPos(origin.x + 12.f, origin.y + 12.f);
+			logicHintMin = labelPos;
+			logicHintMax = { std::min(origin.x + size.x - 8.f, labelPos.x + labelSize.x + 18.f),labelPos.y + labelSize.y + 16.f };
+			dl->AddRectFilled(logicHintMin, logicHintMax, IM_COL32(15, 28, 34, 238), 5.f);
+			dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(labelPos.x + 9.f, labelPos.y + 8.f), IM_COL32(140, 241, 245, 255), guidance.c_str(), nullptr, hintWrapWidth);
+		}
+		const bool clickedLogicHint = state.logicManipulation && mouse.x >= logicHintMin.x && mouse.x <= logicHintMax.x && mouse.y >= logicHintMin.y && mouse.y <= logicHintMax.y;
+		if (hovered && state.logicManipulation)ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+		if (hovered && !clickedLogicHint && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 			const int hitAxis = axisAtMouse(mouse);
+			int hitLogicEdge = -1; float nearestLogicEdge = 5.5f;
+			if (state.logicManipulation) for (size_t edgeIndex = 0; edgeIndex < logicEdges.size(); ++edgeIndex) {
+				const auto& edge = logicEdges[edgeIndex];
+				for (size_t point = 1; point < edge.path.size(); ++point) {
+					const ImVec2 from = edge.path[point - 1], to = edge.path[point];
+					const float vx = to.x - from.x, vy = to.y - from.y, lengthSquared = vx * vx + vy * vy;
+					if (lengthSquared < 1.f)continue;
+					const float t = std::clamp(((mouse.x - from.x) * vx + (mouse.y - from.y) * vy) / lengthSquared, 0.f, 1.f);
+					const float dx = mouse.x - (from.x + vx * t), dy = mouse.y - (from.y + vy * t), distance = std::sqrt(dx * dx + dy * dy);
+					if (distance < nearestLogicEdge) { nearestLogicEdge = distance; hitLogicEdge = (int)edgeIndex; }
+				}
+			}
 			int picked = -1; float closestDepth = -std::numeric_limits<float>::max();
 			if (hitAxis)picked = state.selection;
 			else for (const auto& t : triangles) {
@@ -1517,9 +1707,45 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 					if (depth > closestDepth) { closestDepth = depth; picked = t.block; }
 				}
 			}
-			if (!hitAxis) {
+			if (state.logicManipulation) {
+				if (hitLogicEdge >= 0) {
+					const auto& edge = logicEdges[hitLogicEdge];
+					if (Parser::removeConnectionById(blueprint, blocks, edge.source, edge.targetId))notify("Logic connection removed");
+					if (state.logicSource == edge.source)state.logicSource = -1;
+				}
+				else if (picked < 0) {
+					state.logicSource = -1;
+					state.selection = -1;
+					state.selectionSet.clear();
+					notify("Selection cleared");
+				}
+				else if (controllerIdForPart(picked) < 0) notify("That part cannot be connected");
+				else if (state.logicSource < 0) {
+					state.logicSource = picked;
+					state.selection = picked; state.selectionSet.clear(); state.selectionSet.insert(picked);
+					notify("Logic source selected");
+				}
+				else if (ImGui::GetIO().KeyShift) {
+					state.logicSource = picked;
+					state.selection = picked; state.selectionSet.clear(); state.selectionSet.insert(picked);
+					notify("Logic source changed");
+				}
+				else if (picked == state.logicSource) {
+					const std::string itemName = partDisplayName(picked);
+					if (Parser::addDirectedConnection(blueprint, blocks, picked, picked))notify("Wired " + itemName + " into itself");
+					else notify("Already wired " + itemName + " into itself");
+				}
+				else if (Parser::addDirectedConnection(blueprint, blocks, state.logicSource, picked))notify("Logic connection created");
+				else notify("These parts are already connected");
+			}
+			else if (!hitAxis) {
 				if (ImGui::GetIO().KeyShift) { if (picked >= 0) { state.selection = picked; addSelectionGroup(picked); } }
 				else { state.selection = picked; state.selectionSet.clear(); if (picked >= 0)addSelectionGroup(picked); }
+			}
+			if (!state.logicManipulation && state.stackSelection && state.selection >= 0 && state.selection < (int)blocks.size() && !blocks[state.selection].isJoint) {
+				const Parser::Position target = blocks[state.selection].pos;
+				for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
+				synchronizeJointPositions();
 			}
 			state.dragSelection.clear();
 			if (hitAxis) {
@@ -1534,9 +1760,10 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			const ImVec2 delta = ImVec2(mouse.x - state.lastDragMouse.x, mouse.y - state.lastDragMouse.y);
 			state.lastDragMouse = mouse;
 			const int signedAxis = state.dragAxis;
-			if (state.dragWorldPerPixel > 0.f) { state.dragRemainder += (delta.x * state.dragScreenAxis.x + delta.y * state.dragScreenAxis.y) * state.dragWorldPerPixel; const int steps = (int)std::trunc(state.dragRemainder); if (steps) { for (int index : state.dragSelection)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)nudge(blocks[index], signedAxis == 1 ? steps : signedAxis == -1 ? -steps : 0, signedAxis == 2 ? steps : signedAxis == -2 ? -steps : 0, signedAxis == 3 ? steps : signedAxis == -3 ? -steps : 0); synchronizeJointPositions(); state.dragRemainder -= steps; } }
+			if (state.dragWorldPerPixel > 0.f) { state.dragRemainder += (delta.x * state.dragScreenAxis.x + delta.y * state.dragScreenAxis.y) * state.dragWorldPerPixel; const int steps = (int)std::trunc(state.dragRemainder); if (steps) { moveSelection(signedAxis == 1 ? steps : signedAxis == -1 ? -steps : 0, signedAxis == 2 ? steps : signedAxis == -2 ? -steps : 0, signedAxis == 3 ? steps : signedAxis == -3 ? -steps : 0); state.dragRemainder -= steps; } }
 		}
 		ImGui::EndChild(); ImGui::SameLine(); ImGui::BeginChild("BlockInspector", ImVec2(inspector, 0), true);
+		ImGui::PushTextWrapPos(0.f);
 		ImGui::Text("INSPECTOR"); ImGui::Separator();
 		if (state.selection < 0 || state.selection >= (int)blocks.size())ImGui::TextDisabled("Click a block in the viewport to edit it.");
 		else {
@@ -1552,10 +1779,17 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			if (multiSelection)ImGui::TextDisabled("%zu parts selected · movement and color apply to all", state.selectionSet.size());
 			else if (b.isJoint)ImGui::TextDisabled("Joint %d  ·  render pivot at attachment A", b.jointIndex + 1);
 			else ImGui::TextDisabled("Part %d of %d  ·  body %d", state.selection + 1, (int)blocks.size(), b.bodyIndex + 1);
+			if (multiSelection && !b.isJoint) {
+				if (ImGui::Checkbox("Stack selected parts at active position", &state.stackSelection) && state.stackSelection) {
+					const Parser::Position target = b.pos;
+					for (int index : state.selectionSet)if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint)blocks[index].pos = target;
+					synchronizeJointPositions();
+				}
+				ImGui::TextDisabled("When enabled, movement keeps all selected parts at that position.");
+			}
 			ImGui::Spacing();
 			ImGui::Text("Position");
 			if (b.isJoint) {
-				ImGui::Text("Position");
 				ImGui::TextDisabled("A  (%d, %d, %d)", b.jointPosA.x, b.jointPosA.y, b.jointPosA.z);
 				ImGui::TextDisabled("B  (%d, %d, %d)", b.jointPosB.x, b.jointPosB.y, b.jointPosB.z);
 			}
@@ -1565,13 +1799,13 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 					const long long delta = (long long)target - (long long)current;
 					return (int)std::clamp(delta, (long long)std::numeric_limits<int>::min(), (long long)std::numeric_limits<int>::max());
 					};
-				ImGui::Text("Position");
 				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("X##pos", &positionX, 0, 0))moveSelection(positionDelta(positionX, b.pos.x), 0, 0);
 				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Y##pos", &positionY, 0, 0))moveSelection(0, positionDelta(positionY, b.pos.y), 0);
 				ImGui::SetNextItemWidth(-1); if (ImGui::InputInt("Z##pos", &positionZ, 0, 0))moveSelection(0, 0, positionDelta(positionZ, b.pos.z));
-				if (ImGui::Button("Left -X", ImVec2(-1, 0)))moveSelection(-1, 0, 0); if (ImGui::Button("Right +X", ImVec2(-1, 0)))moveSelection(1, 0, 0);
-				if (ImGui::Button("Forward +Y", ImVec2(-1, 0)))moveSelection(0, 1, 0); if (ImGui::Button("Back -Y", ImVec2(-1, 0)))moveSelection(0, -1, 0);
-				if (ImGui::Button("Up +Z", ImVec2(-1, 0)))moveSelection(0, 0, 1); if (ImGui::Button("Down -Z", ImVec2(-1, 0)))moveSelection(0, 0, -1);
+				const float movementButtonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * .5f;
+				if (ImGui::Button("Left -X", ImVec2(movementButtonWidth, 0)))moveSelection(-1, 0, 0); ImGui::SameLine(); if (ImGui::Button("Right +X", ImVec2(movementButtonWidth, 0)))moveSelection(1, 0, 0);
+				if (ImGui::Button("Forward +Y", ImVec2(movementButtonWidth, 0)))moveSelection(0, 1, 0); ImGui::SameLine(); if (ImGui::Button("Back -Y", ImVec2(movementButtonWidth, 0)))moveSelection(0, -1, 0);
+				if (ImGui::Button("Up +Z", ImVec2(movementButtonWidth, 0)))moveSelection(0, 0, 1); ImGui::SameLine(); if (ImGui::Button("Down -Z", ImVec2(movementButtonWidth, 0)))moveSelection(0, 0, -1);
 			}
 			if (b.isJoint) {
 				ImGui::Spacing(); ImGui::Text("Joint orientation");
@@ -1584,7 +1818,9 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 				int xi = axisIndex(b.xaxis), zi = axisIndex(b.zaxis);
 				ImGui::Text("Local X axis"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localXAxis", &xi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[xi]; if (std::abs(dot(axis(candidate), axis(b.zaxis))) < .5f)b.xaxis = candidate; else xi = axisIndex(b.xaxis); }
 				ImGui::Text("Local Z axis (up)"); ImGui::SetNextItemWidth(-1); if (ImGui::Combo("##localZAxis", &zi, "-Z\0-X\0-Y\0+X\0+Y\0+Z\0")) { int candidate = axisValues[zi]; if (std::abs(dot(axis(candidate), axis(b.xaxis))) < .5f)b.zaxis = candidate; else zi = axisIndex(b.zaxis); }
-				if (ImGui::Button("Rotate +90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, 1), rotateAxisAroundZ(b.zaxis, 1)); }if (ImGui::Button("Rotate -90° around Z (up)", ImVec2(-1, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, -1), rotateAxisAroundZ(b.zaxis, -1)); }
+				const float rotationButtonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * .5f;
+				if (ImGui::Button("Rotate +90°", ImVec2(rotationButtonWidth, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, 1), rotateAxisAroundZ(b.zaxis, 1)); } ImGui::SameLine(); if (ImGui::Button("Rotate -90°", ImVec2(rotationButtonWidth, 0))) { setOrientation(b, rotateAxisAroundZ(b.xaxis, -1), rotateAxisAroundZ(b.zaxis, -1)); }
+				ImGui::TextWrapped("Rotate around local Z (up).");
 				if (ImGui::Button("Reset rotation", ImVec2(-1, 0))) { setOrientation(b, 1, 3); }
 			}
 			ImGui::Spacing(); ImGui::Text("Dimensions");
@@ -1681,6 +1917,7 @@ V3 axis(int v) { switch (v) { case 1:return { 1,0,0 }; case -1:return { -1,0,0 }
 			foreground->AddText(ImVec2(toastPos.x + padding.x, toastPos.y + padding.y), IM_COL32(238, 250, 240, 255), state.notification.c_str());
 		}
 		else if (ImGui::GetTime() >= state.notificationUntil)state.notification.clear();
+		ImGui::PopTextWrapPos();
 		ImGui::EndChild(); ImGui::End();
 	}
 }

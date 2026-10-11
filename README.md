@@ -31,6 +31,8 @@ The editor saves directly to the selected blueprint folder. Make a backup of imp
 - Click a part to select it. Hold **Shift** and click other parts to add them to the selection.
 - Drag one of the **+X**, **-X**, **+Y**, **-Y**, **+Z**, or **-Z** arrows to move the entire selection along that axis.
 - The Inspector’s position fields and movement buttons also move the whole selection.
+- Enable **Stack selected parts at active position** in the Inspector to place all selected parts at the active part’s position. Movement keeps them together at that shared position; changing the active part updates the shared position.
+- Enable **Logic manipulation**, click a source part, then click target parts to create directed links in the viewport. Click the source itself to wire it into itself, or Shift-click another part to switch sources. Click empty viewport space to clear the source and selection. Arrows show link direction; click an arrow to remove that connection. Press Esc or disable the mode to return to normal selection and movement.
 - The cyan outline marks the active part; other selected parts have their own outlines.
 - Rotation controls edit the active part.
 - Press **Delete** or click **Remove selected parts** to remove the selection.
