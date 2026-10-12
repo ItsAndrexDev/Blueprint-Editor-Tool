@@ -26,19 +26,26 @@ Use **Undo** or **Ctrl+Z** to undo an edit, and **Redo** or **Ctrl+Y** to restor
 
 The editor saves directly to the selected blueprint folder. Make a backup of important blueprints before editing.
 
+## Blueprint loader
+
+- Type in **Search blueprints...** to filter the list by blueprint name. The search is case-sensitive.
+- Press **Refresh** to scan the Scrap Mechanic blueprint folder again.
+- Select a blueprint’s image to open it in the editor. **Back to Selection** returns to the loader.
+- The loader shows the number of blueprints currently found.
+
 ## Selection and movement
 <img width="1908" height="1028" alt="image" src="https://github.com/user-attachments/assets/580f48db-67dd-4ae0-bb5a-2372f3a7925d" />
 
 - Click a part to select it. Hold **Shift** and click other parts to add them to the selection.
 - Drag one of the **+X**, **-X**, **+Y**, **-Y**, **+Z**, or **-Z** arrows to move the entire selection along that axis.
 - The Inspector’s position fields and movement buttons also move the whole selection.
-- Enable **Stack selected parts at active position** in the Inspector to place all selected parts at the active part’s position. Movement keeps them together at that shared position; changing the active part updates the shared position.
-- Use **Copy** / **Paste** or **Ctrl+C** / **Ctrl+V** to duplicate selected parts and joints. Joints between two selected parts are included automatically. Part copies are selected after paste and move one additional grid unit along +X each time; their copied joints follow them.
-- Enable **Copy block state (connections)** before pasting to preserve controller settings and wiring. Links between copied parts point to their new copies; links from copied parts to unselected targets stay on the originals. Unselected sources connected to copied targets also connect to the pasted copies. When disabled, copied controllers reset to defaults and logic links are cleared.
-- Enable **Logic manipulation**, click a source part, then click target parts to create directed links in the viewport. Click the source itself to wire it into itself, or Shift-click another part to switch sources. Click empty viewport space to clear the source and selection. Arrows show link direction; click an arrow to remove that connection. Press Esc or disable the mode to return to normal selection and movement.
+- The active part is the last part clicked. With multiple parts selected, **Stack selected parts at active position** moves the selected non-joint parts onto the active part’s position. Subsequent movement moves the selection together.
+- Use **Copy** / **Paste** or **Ctrl+C** / **Ctrl+V** to duplicate selected parts and joints. Joints between selected parts are included automatically. Pasted parts are selected and move one additional grid unit along +X for each paste; their copied joints follow them.
+- **Copy block state (connections)** starts off. Turn it on before pasting to preserve controller settings and logic connections. Links between copied parts point to the pasted copies; links from copied parts to unselected targets stay on the originals. Unselected sources connected to copied targets also connect to the pasted copies. When off, copied controller settings reset to defaults and logic links are cleared.
+- **Gate Labels: Off/On** starts off. Turn it on to display each logic gate’s setting (`AND`, `OR`, `XOR`, `NAND`, `NOR`, or `XNOR`) over the gate in the viewport. The Inspector shows the setting for a selected logic gate regardless of this display option.
+- **Start Logic Editing** enables connection editing. Click a controller part to choose a source, then click controller targets to add directed connections. Click the source itself to connect it to itself, or Shift-click a different controller to switch sources. Click empty viewport space to clear the source and selection. Click a connection arrow to remove it. **Stop Logic Editing** or **Esc** exits the mode and restores normal selection and movement.
 - The cyan outline marks the active part; other selected parts have their own outlines.
-- Rotation controls edit the active part.
-- Press **Delete** or click **Remove selected parts** to remove the selection.
+- Press **Delete** or click **Remove selected part(s)** in the Inspector to remove the selection. Undo can restore the removal.
 
 Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable blocks, local Z is height and local Y is depth. When multiple parts are selected, the Dimensions panel shows the combined world-space width (X), depth (Y), and height (Z) of the selection.
 
@@ -48,8 +55,9 @@ Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable 
 
 - Type a six-digit hex color such as `3E9FFE`, or click the color swatch to open the color picker.
 - Color edits apply to every selected part.
-- With one supported built-in block selected, use Width, Height, and Depth to resize it.
+- With one supported built-in block selected, use **Width**, **Height**, and **Depth** to resize it. Unsupported fixed-size parts show their footprint instead.
 - With multiple parts selected, Dimensions shows their combined size instead of individual resize controls.
+- The Inspector’s orientation controls set the part’s local X and local Z (up) axes. **Rotate +90°** and **Rotate -90°** turn the active part around local Z; **Reset rotation** restores the default orientation. Joints follow the orientation of their connected bodies.
 
 ## View controls
 
@@ -64,12 +72,20 @@ Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable 
 | Redo an undone edit | **Ctrl+Y** or **Redo** |
 | Copy the selection | **Ctrl+C** or **Copy** |
 | Paste the copied objects | **Ctrl+V** or **Paste**; parts move along +X |
+| Remove the selection | **Delete** or **Remove selected part(s)** |
+| Add a part to the selection | **Shift-click** |
+| Exit logic editing | **Esc** or **Stop Logic Editing** |
+| Move selected parts | Drag an axis arrow, use position fields, or click a movement button |
+
+Keyboard shortcuts work while the **Blueprint Editor** window is focused and no field, UI item, or popup is taking input. Mouse controls apply while the pointer is over the 3D viewport.
 
 ## Blueprint compatibility
 
 Parts marked **Survival-only** cannot be spawned in Creative mode. The editor identifies these parts and lets you select and remove them. Remove incompatible parts before using the creation in Creative, or load it in a Survival world.
 
 Some parts, including parts from mods or unsupported game assets, may not have a model the editor can display. The blueprint data can still be edited, but the viewport may show a fallback shape for those parts.
+
+The Inspector’s **Scene** section reports loaded game models, built-in block previews, and parts shown with fallback boxes. For large blueprints, the editor reduces real-mesh detail to keep the viewport responsive.
 
 ## Building from source
 
