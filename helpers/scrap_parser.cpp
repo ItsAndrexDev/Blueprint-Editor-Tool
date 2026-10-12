@@ -269,14 +269,24 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 	}
 	for (const auto& joint : clipboard.joints)if (!joint.data.is_object())return false;
 
-	std::unordered_set<std::int64_t> usedIds, existingControllerIds;
+	std::unordered_set<std::int64_t> usedIds;
 	auto rememberId = [&](const json& value) {
 		if (!value.is_number_integer())return;
 		try { const auto id = value.get<std::int64_t>(); usedIds.insert(id); } catch (...) {}
 	};
 	auto rememberControllerId = [&](const json& owner) {
-		if (!owner.is_object() || !owner.contains("controller") || !owner["controller"].is_object() || !owner["controller"].contains("id") || !owner["controller"]["id"].is_number_integer())return;
-		try { const auto id = owner["controller"]["id"].get<std::int64_t>(); usedIds.insert(id); existingControllerIds.insert(id); } catch (...) {}
+		if (!owner.is_object())return;
+		if (owner.contains("controller") && owner["controller"].is_object()) {
+			const auto& controller = owner["controller"];
+			if (controller.contains("id"))rememberId(controller["id"]);
+			for (const char* key : {"controllers", "joints"})
+				if (controller.contains(key) && controller[key].is_array())
+					for (const auto& reference : controller[key])
+						if (reference.is_object() && reference.contains("id"))rememberId(reference["id"]);
+		}
+		if (owner.contains("joints") && owner["joints"].is_array())
+			for (const auto& reference : owner["joints"])
+				if (reference.is_object() && reference.contains("id"))rememberId(reference["id"]);
 	};
 	if (blueprint.contains("bodies") && blueprint["bodies"].is_array())for (const auto& body : blueprint["bodies"]) {
 		if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())continue;
@@ -374,15 +384,14 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 		}
 		if (controller.contains("controllers") && controller["controllers"].is_array()) {
 			auto& connections = controller["controllers"];
-			connections.erase(std::remove_if(connections.begin(), connections.end(), [&](json& connection) {
-				if (!connection.is_object() || !connection.contains("id") || !connection["id"].is_number_integer())return false;
+			for (auto& connection : connections) {
+				if (!connection.is_object() || !connection.contains("id") || !connection["id"].is_number_integer())continue;
 				try {
 					const auto targetId = connection["id"].get<std::int64_t>();
 					auto cloned = controllerIdRemap.find(targetId);
-					if (cloned != controllerIdRemap.end()) { connection["id"] = cloned->second; return false; }
-					return !existingControllerIds.contains(targetId);
-				} catch (...) { return false; }
-			}), connections.end());
+					if (cloned != controllerIdRemap.end())connection["id"] = cloned->second;
+				} catch (...) {}
+			}
 		}
 		if (controller.contains("joints") && controller["joints"].is_array()) {
 			auto& configuredJoints = controller["joints"];
@@ -395,6 +404,44 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 					return false;
 				} catch (...) { return false; }
 			}), configuredJoints.end());
+		}
+	};
+	// Blueprint connections are stored only on the source controller. When a
+	// copied target has an incoming wire from a source outside the selection,
+	// duplicate that reference on the original source so the pasted target keeps
+	// the same input. Sources copied in this operation already get their links
+	// remapped to the pasted targets above, so leave their originals untouched.
+	auto duplicateIncomingControllerReferences = [&](json& owner) {
+		if (!clipboard.copyBlockState || !owner.is_object() ||
+			!owner.contains("controller") || !owner["controller"].is_object())return;
+		auto& controller = owner["controller"];
+		const std::int64_t sourceId = integer64(controller, "id");
+		if (controllerIdRemap.contains(sourceId) || !controller.contains("controllers") ||
+			!controller["controllers"].is_array())return;
+		auto& connections = controller["controllers"];
+		const auto originalConnections = connections;
+		for (const auto& connection : originalConnections) {
+			if (!connection.is_object() || !connection.contains("id") ||
+				!connection["id"].is_number_integer())continue;
+			std::int64_t targetId = -1;
+			try { targetId = connection["id"].get<std::int64_t>(); } catch (...) { continue; }
+			auto clonedTarget = controllerIdRemap.find(targetId);
+			if (clonedTarget == controllerIdRemap.end())continue;
+			bool alreadyConnected = false;
+			for (const auto& existing : connections) {
+				if (!existing.is_object() || !existing.contains("id") ||
+					!existing["id"].is_number_integer())continue;
+				try {
+					alreadyConnected = existing["id"].get<std::int64_t>() == clonedTarget->second;
+				} catch (...) {
+					continue;
+				}
+				if (alreadyConnected)break;
+			}
+			if (alreadyConnected)continue;
+			json clonedConnection = connection;
+			clonedConnection["id"] = clonedTarget->second;
+			connections.push_back(std::move(clonedConnection));
 		}
 	};
 	auto remapChildJointReferences = [&](json& child) {
@@ -434,12 +481,18 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 		auto& body = staged["bodies"][bodyIndex];
 		if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())continue;
 		for (int childIndex = 0; childIndex < (int)body["childs"].size(); ++childIndex) {
-			if (!pastedFlatIndices.contains(flatChildIndex(staged, bodyIndex, childIndex)))continue;
 			auto& child = body["childs"][childIndex];
+			if (!pastedFlatIndices.contains(flatChildIndex(staged, bodyIndex, childIndex))) {
+				duplicateIncomingControllerReferences(child);
+				continue;
+			}
 			remapChildJointReferences(child);
 			remapControllerState(child);
 		}
 	}
+	if (staged.contains("joints") && staged["joints"].is_array())
+		for (size_t jointIndex = 0; jointIndex < staged["joints"].size(); ++jointIndex)
+			duplicateIncomingControllerReferences(staged["joints"][jointIndex]);
 	for (auto& joint : clonedJoints)remapControllerState(joint);
 	std::vector<std::pair<int, std::int64_t>> originalEndpointReferences;
 	for (size_t i = 0; i < clipboard.joints.size(); ++i) {

@@ -18,6 +18,13 @@
 namespace BlueprintViewport::Internal {
 using V3 = BlueprintViewport::Vec3;
 
+inline const char *logicGateModeName(int mode) {
+  static constexpr const char *names[] = {"AND", "OR", "XOR", "NAND", "NOR", "XNOR"};
+  return mode >= 0 && mode < (int)(sizeof(names) / sizeof(names[0]))
+             ? names[mode]
+             : "Unknown";
+}
+
 inline V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 inline V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 inline V3 operator*(V3 a, float b) { return {a.x * b, a.y * b, a.z * b}; }
@@ -78,6 +85,7 @@ struct State {
   std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;
   std::unordered_map<std::wstring, std::shared_ptr<Mesh>> meshFiles;
   std::unordered_map<std::wstring, GLuint> textures;
+  std::unordered_map<std::wstring, std::array<GLuint, 6>> logicGateModeTextures;
 
   std::vector<json> blueprintHistory;
   std::size_t historyCursor{};
@@ -95,6 +103,7 @@ struct State {
   bool logicManipulation{};
   int logicSource = -1;
   bool copyBlockState{true};
+  bool showLogicGateLabels{true};
   Parser::SelectionClipboard clipboard;
   std::filesystem::path clipboardBlueprint;
   std::size_t clipboardPasteCount{};
@@ -138,6 +147,7 @@ int displayColor(const Parser::Block &block);
 
 std::shared_ptr<Mesh> meshFor(const std::string &shapeId);
 GLuint diffuseTextureFor(const std::filesystem::path &diffuseTexture);
+GLuint logicGateModeTextureFor(const std::filesystem::path &diffuseTexture, int mode);
 bool loadFbx(const std::filesystem::path &path, Mesh &mesh);
 bool loadDae(const std::filesystem::path &path, Mesh &mesh);
 bool loadOgreMesh(const std::filesystem::path &path, Mesh &mesh);
@@ -191,6 +201,7 @@ struct InspectorContext {
   std::function<V3()> selectedWorldSize;
   std::function<void(const std::string &)> setSelectionColor;
   std::function<bool()> removeSelection;
+  std::function<int(int)> logicGateMode;
 };
 void renderInspector(const InspectorContext &context);
 } // namespace BlueprintViewport::Internal

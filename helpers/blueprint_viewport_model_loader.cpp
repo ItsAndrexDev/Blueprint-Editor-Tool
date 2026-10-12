@@ -128,6 +128,75 @@ GLuint diffuseTextureFor(const std::filesystem::path &diffuseTexture) {
   return texture;
 }
 
+GLuint logicGateModeTextureFor(const std::filesystem::path &diffuseTexture,
+                               int mode) {
+  if (diffuseTexture.empty() || mode < 0 || mode > 5)
+    return 0;
+  const auto key = diffuseTexture.lexically_normal().native();
+  auto found = state.logicGateModeTextures.find(key);
+  if (found != state.logicGateModeTextures.end() && found->second[mode])
+    return found->second[mode];
+
+  int width = 0, height = 0, channels = 0;
+  unsigned char *pixels = stbi_load(diffuseTexture.string().c_str(), &width,
+                                    &height, &channels, 4);
+  if (!pixels || width < 6 || height < 6) {
+    if (pixels)
+      stbi_image_free(pixels);
+    return 0;
+  }
+
+  // The game texture has six gate symbols across each atlas row. Its second
+  // row is the lit cyan version used to make the selected setting visible.
+  // Mode indices follow LogicGateIcons.xml: AND, OR, XOR, NAND, NOR, XNOR.
+  const int x0 = mode * width / 6;
+  const int x1 = (mode + 1) * width / 6;
+  const int cropWidth = x1 - x0;
+  const int y0 = height / 6;
+  const int y1 = height / 3;
+  const int cropHeight = y1 - y0;
+  if (cropWidth <= 0 || cropHeight <= 0 ||
+      (size_t)cropWidth * (size_t)cropHeight * 4 >
+          256ull * 1024ull * 1024ull - state.textureCacheBytes) {
+    stbi_image_free(pixels);
+    return 0;
+  }
+  std::vector<unsigned char> crop((size_t)cropWidth * cropHeight * 4);
+  for (int y = 0; y < cropHeight; ++y)
+    std::memcpy(crop.data() + (size_t)y * cropWidth * 4,
+                pixels + ((size_t)(y0 + y) * width + x0) * 4,
+                (size_t)cropWidth * 4);
+  stbi_image_free(pixels);
+
+  const GlStateSnapshot saved = captureGlState();
+  GLint unpackAlignment = 4;
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlignment);
+  while (glGetError() != GL_NO_ERROR) {
+  }
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cropWidth, cropHeight, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, crop.data());
+  const GLenum uploadError = glGetError();
+  glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment);
+  restoreGlState(saved);
+  if (uploadError != GL_NO_ERROR) {
+    if (texture)
+      glDeleteTextures(1, &texture);
+    return 0;
+  }
+  state.textureCacheBytes += crop.size();
+  state.logicGateModeTextures[key][mode] = texture;
+  return texture;
+}
+
 void buildNormals(Mesh &mesh) {
   struct PositionKey {
     int64_t x{}, y{}, z{};
@@ -192,6 +261,13 @@ void buildNormals(Mesh &mesh) {
 }
 
 void releaseTextureCache() {
+  for (const auto &[path, textures] : state.logicGateModeTextures) {
+    (void)path;
+    for (GLuint texture : textures)
+      if (texture)
+        glDeleteTextures(1, &texture);
+  }
+  state.logicGateModeTextures.clear();
   for (const auto &[path, texture] : state.textures)
     if (texture)
       glDeleteTextures(1, &texture);

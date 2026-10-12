@@ -44,6 +44,12 @@ void renderInspector(const InspectorContext &context) {
       ImGui::TextDisabled("Joint %d  ·  render pivot at attachment A", b.jointIndex + 1);
     else
       ImGui::TextDisabled("Part %d of %d  ·  body %d", state.selection + 1, (int)blocks.size(), b.bodyIndex + 1);
+    if (!b.isJoint &&
+        lower(b.shapeID) == "9f0f56e8-2c31-4d83-996c-d00a9b296c3f") {
+      const int mode = context.logicGateMode ? context.logicGateMode(state.selection) : 0;
+      ImGui::TextColored(ImVec4(.40f, .88f, .94f, 1.f), "Logic setting: %s",
+                         logicGateModeName(mode));
+    }
     if (multiSelection && !b.isJoint) {
       if (ImGui::Button("Stack selected parts at active position")) {
         const Parser::Position target = b.pos;

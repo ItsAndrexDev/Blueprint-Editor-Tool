@@ -276,8 +276,7 @@ void EditingActions::copySelectedObjects() {
   state.clipboard = std::move(copied);
   state.clipboardBlueprint = blueprintPath_;
   state.clipboardPasteCount = 0;
-  BlueprintViewport::notify("Copied " + std::to_string(state.clipboard.objectCount()) + " object(s)" +
-                            (state.copyBlockState ? " with block state" : " without block state"));
+  BlueprintViewport::notify("Copied " + std::to_string(state.clipboard.objectCount()) + " object(s)");
 }
 
 void EditingActions::pasteCopiedObjects() {

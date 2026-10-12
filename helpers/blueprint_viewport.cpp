@@ -212,11 +212,19 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
   ImGui::Checkbox("Copy block state (connections)", &state.copyBlockState);
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("When enabled, Paste copies controller settings and wiring. Links "
-                      "between copied parts point to their pasted copies; links to parts "
-                      "outside the selection keep their original targets. Toggle before paste.");
+                      "between copied parts point to their pasted copies. Copied parts "
+                      "keep links to original targets, and unselected sources also link "
+                      "to pasted targets. Toggle before paste.");
   ImGui::SameLine();
   ImGui::TextDisabled("Ctrl+C / Ctrl+V");
   ImGui::Spacing();
+  if (ImGui::Button(state.showLogicGateLabels ? "Gate Labels: On"
+                                               : "Gate Labels: Off")) {
+    state.showLogicGateLabels = !state.showLogicGateLabels;
+    notify(state.showLogicGateLabels ? "Logic gate labels enabled"
+                                     : "Logic gate labels disabled");
+  }
+  ImGui::SameLine();
   const bool logicButtonWasActive = state.logicManipulation;
   if (logicButtonWasActive) {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.13f, .43f, .48f, 1.f));
@@ -382,6 +390,14 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
     const bool isLogicGate =
         lower(b.shapeID) == "9f0f56e8-2c31-4d83-996c-d00a9b296c3f";
     const int logicGateMode = isLogicGate ? logicGateModeForPart((int)bi) : 0;
+    GLuint gateModeTexture = 0;
+    if (isLogicGate && catalogEntry != state.catalog.end()) {
+      const auto screenMaterial =
+          catalogEntry->second.materialTextures.find("screen");
+      if (screenMaterial != catalogEntry->second.materialTextures.end())
+        gateModeTexture =
+            logicGateModeTextureFor(screenMaterial->second, logicGateMode);
+    }
     const bool centerMeshOnFootprint =
         catalogEntry != state.catalog.end() &&
         catalogEntry->second.centerMeshOnFootprint;
@@ -453,7 +469,8 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
     auto append =
         [&](V3 aa, V3 bb, V3 cc, V3 na, V3 nb, V3 nc,
             std::array<float, 2> ta = {}, std::array<float, 2> tb = {},
-            std::array<float, 2> tc = {}, GLuint triangleTexture = UINT32_MAX) {
+            std::array<float, 2> tc = {}, GLuint triangleTexture = UINT32_MAX,
+            bool preserveTextureColors = false) {
           V3 a = world(aa), q = world(bb), r = world(cc);
           const V3 transformed[3] = {
               norm(orient({na.x / sc[0], na.y / sc[1], na.z / sc[2]}, b)),
@@ -466,9 +483,12 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
                 .88f + .12f * std::max(0.f, dot(transformed[i], lightDir));
             float shade =
                 isSelected((int)bi) ? std::min(1.f, light * 1.04f) : light;
-            colors[i] =
-                IM_COL32((int)(red * shade * 255), (int)(green * shade * 255),
-                         (int)(blue * shade * 255), 255);
+            const float tintRed = preserveTextureColors ? 1.f : red;
+            const float tintGreen = preserveTextureColors ? 1.f : green;
+            const float tintBlue = preserveTextureColors ? 1.f : blue;
+            colors[i] = IM_COL32((int)(tintRed * shade * 255),
+                                 (int)(tintGreen * shade * 255),
+                                 (int)(tintBlue * shade * 255), 255);
           }
           float da, db, dc;
           auto pa = screen(a, da), pb = screen(q, db), pc = screen(r, dc);
@@ -502,13 +522,19 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
                                      m->triangleMaterials[tri] == "screen";
         auto screenUvAt = [&](uint32_t i) {
           auto uv = uvAt(i);
-          // The gate's screen is a six-frame horizontal strip in the game's
-          // diffuse atlas. FBX UVs address the AND frame; each saved controller
-          // mode advances one 1/6-wide frame (AND, OR, XOR, NAND, NOR, XNOR).
-          // Keep its vertical coordinate unchanged so the mesh's authored
-          // active/inactive screen row is preserved.
-          if (logicGateScreen)
-            uv[0] += (float)logicGateMode / 6.f;
+          if (logicGateScreen) {
+            const float localU = std::clamp(uv[0] * 6.f, 0.f, 1.f);
+            const float localV = std::clamp(uv[1] * 6.f, 0.f, 1.f);
+            if (gateModeTexture) {
+              // The per-mode texture already contains just the lit icon.
+              uv = {localU, localV};
+            } else {
+              // Keep a correct in-atlas fallback if a dedicated crop cannot
+              // be uploaded: six modes span the first row, with their lit
+              // variants in the second row.
+              uv = {(logicGateMode + localU) / 6.f, (1.f + localV) / 6.f};
+            }
+          }
           return uv;
         };
         GLuint triangleTexture = UINT32_MAX;
@@ -519,9 +545,12 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
           if (material != catalogEntry->second.materialTextures.end())
             triangleTexture = diffuseTextureFor(material->second);
         }
+        if (logicGateScreen && gateModeTexture)
+          triangleTexture = gateModeTexture;
         append(m->vertices[ia], m->vertices[ib], m->vertices[ic],
                m->normals[ia], m->normals[ib], m->normals[ic], screenUvAt(ia),
-               screenUvAt(ib), screenUvAt(ic), triangleTexture);
+               screenUvAt(ib), screenUvAt(ic), triangleTexture,
+               logicGateScreen);
       }
     } else {
       V3 v[8] = {{-.5f, -.5f, -.5f}, {.5f, -.5f, -.5f}, {.5f, .5f, -.5f}, {-.5f, .5f, -.5f},
@@ -582,6 +611,32 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
     dl->AddRectFilled(label, ImVec2(label.x + 378.f, label.y + 28.f), IM_COL32(16, 20, 26, 235), 5.f);
     dl->AddText(ImVec2(label.x + 8.f, label.y + 7.f), IM_COL32(255, 210, 135, 255),
                 "Large creation: real meshes shown at reduced detail.");
+  }
+  if (state.showLogicGateLabels) {
+    dl->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
+    for (size_t index = 0; index < blocks.size(); ++index) {
+      if (coarsePreview && !coarsePreviewParts.contains((int)index))
+        continue;
+      if (lower(blocks[index].shapeID) !=
+          "9f0f56e8-2c31-4d83-996c-d00a9b296c3f")
+        continue;
+      const char *mode = logicGateModeName(logicGateModeForPart((int)index));
+      const ImVec2 textSize = ImGui::CalcTextSize(mode);
+      float gateDepth;
+      const ImVec2 center = screen(blockCenter(blocks[index]), gateDepth);
+      (void)gateDepth;
+      const ImVec2 textPosition(center.x - textSize.x * .5f,
+                                center.y - textSize.y * .5f);
+      constexpr float paddingX = 5.f, paddingY = 3.f;
+      const ImVec2 badgeMin(textPosition.x - paddingX,
+                            textPosition.y - paddingY);
+      const ImVec2 badgeMax(textPosition.x + textSize.x + paddingX,
+                            textPosition.y + textSize.y + paddingY);
+      dl->AddRectFilled(badgeMin, badgeMax, IM_COL32(10, 20, 27, 238), 4.f);
+      dl->AddRect(badgeMin, badgeMax, IM_COL32(70, 210, 226, 245), 4.f, 0, 1.f);
+      dl->AddText(textPosition, IM_COL32(218, 251, 255, 255), mode);
+    }
+    dl->PopClipRect();
   }
   struct LogicEdge {
     int source{}, target{};
@@ -984,7 +1039,8 @@ void render(json &blueprint, const std::filesystem::path &blueprintPath, std::ve
   ImGui::EndChild();
   ImGui::SameLine();
   renderInspector(InspectorContext{blocks, items, inspector, coarsePreview, moveSelection, synchronizeJointPositions,
-                                   selectedWorldSize, setSelectionColor, removeSelection});
+                                   selectedWorldSize, setSelectionColor, removeSelection,
+                                   logicGateModeForPart});
   json frameSnapshot = blueprint;
   Parser::applyBlockListToNode(blocks, frameSnapshot);
   if (state.blueprintHistory.empty()) {
