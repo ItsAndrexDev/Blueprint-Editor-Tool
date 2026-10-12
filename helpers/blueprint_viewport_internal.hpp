@@ -102,8 +102,8 @@ struct State {
   bool stackSelection{};
   bool logicManipulation{};
   int logicSource = -1;
-  bool copyBlockState{true};
-  bool showLogicGateLabels{true};
+  bool copyBlockState{false};
+  bool showLogicGateLabels{false};
   Parser::SelectionClipboard clipboard;
   std::filesystem::path clipboardBlueprint;
   std::size_t clipboardPasteCount{};
