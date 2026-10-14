@@ -4,7 +4,8 @@ Scrap Mechanic Blueprint Editor is a Windows desktop tool for viewing and editin
 
 It is an independent fan project and is not affiliated with Axolot Games.
 
-![Blueprint loader](https://github.com/user-attachments/assets/8506f7a5-f254-4771-9e5d-e89aa9e03d49)
+
+
 
 ## Contents
 
@@ -21,6 +22,8 @@ It is an independent fan project and is not affiliated with Axolot Games.
 
 ## Open a blueprint
 
+<img width="1919" height="1028" alt="image" src="https://github.com/user-attachments/assets/5bff6cd4-9291-43d3-9229-1c7cfaccc32d" />
+
 1. Start the editor. The **Blueprint Loader** scans the Scrap Mechanic user folder for saved blueprints.
 2. Type all or part of a blueprint name in **Search blueprints...** to filter the list. Search matches are case-sensitive.
 3. Select a blueprint’s thumbnail to open it. The count beside **Refresh** shows how many blueprints are loaded.
@@ -31,7 +34,8 @@ The editor reads blueprints from `%APPDATA%\Axolot Games\Scrap Mechanic\User\<Us
 
 ## Selection and part search
 
-![Blueprint editor](https://github.com/user-attachments/assets/580f48db-67dd-4ae0-bb5a-2372f3a7925d)
+<img width="1918" height="1032" alt="image" src="https://github.com/user-attachments/assets/03366475-bcbb-48a9-bd3b-b0357aa06132" />
+
 
 - Click a part in the viewport to select it. **Shift-click** adds another part without clearing the current selection.
 - The cyan outline marks the active part. Other selected parts are outlined too. Click empty space in normal editing mode to clear the selection.
@@ -79,6 +83,8 @@ Logic gates and physical Controllers are different parts and have separate setti
 
 ### Logic connections
 
+<img width="1919" height="1028" alt="image" src="https://github.com/user-attachments/assets/3add167e-681d-46ff-9ca1-4af1377e7800" />
+
 1. Select **Start Logic Editing**.
 2. Click a connectable interactive part to choose the source. Click another part to add a directed connection from the source to that target.
 3. **Shift-click** a different connectable part to switch the source. Click the source itself to connect it to itself.
@@ -88,6 +94,8 @@ Logic gates and physical Controllers are different parts and have separate setti
 Logic Editing changes connections between interactive parts. It does not edit a physical Controller’s bearing rotation settings.
 
 ## Controller bearing rotations
+
+<img width="1919" height="1032" alt="image" src="https://github.com/user-attachments/assets/bf1b2662-d52a-4c93-b5e9-a9763cfae5af" />
 
 Select a physical **Controller** part, then use **Controller settings → Edit bearing rotations...** in the Inspector. The editor lists connected bearings with saved settings.
 
