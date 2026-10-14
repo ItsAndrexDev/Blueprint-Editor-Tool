@@ -5,6 +5,8 @@ Scrap Mechanic Blueprint Editor is a Windows desktop tool for viewing and editin
 It is an independent fan project and is not affiliated with Axolot Games.
 
 
+Please do join the Discord server for feature requests and bug reports!
+https://discord.gg/8p3JU8Vn8D
 
 
 ## Contents
