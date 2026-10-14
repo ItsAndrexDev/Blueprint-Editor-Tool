@@ -122,32 +122,17 @@ namespace BlueprintViewport {
 		auto selectedWorldSize = [&actions]() { return actions.selectedWorldSize(); };
 		auto setSelectionColor = [&actions](const std::string& color) { actions.setSelectionColor(color); };
 		auto removeSelection = [&actions]() { return actions.removeSelection(); };
-		auto logicGateModeForPart = [&blueprint, &blocks](int index) {
-			if (index < 0 || index >= (int)blocks.size() || blocks[index].isJoint ||
-				blocks[index].bodyIndex < 0 || blocks[index].childIndex < 0 ||
-				!blueprint.is_object() || !blueprint.contains("bodies") ||
-				!blueprint["bodies"].is_array() ||
-				blocks[index].bodyIndex >= (int)blueprint["bodies"].size())
-				return 0;
-			const auto& body = blueprint["bodies"][blocks[index].bodyIndex];
-			if (!body.is_object() || !body.contains("childs") ||
-				!body["childs"].is_array() ||
-				blocks[index].childIndex >= (int)body["childs"].size())
-				return 0;
-			const auto& child = body["childs"][blocks[index].childIndex];
-			if (!child.is_object() || !child.contains("controller") ||
-				!child["controller"].is_object() ||
-				!child["controller"].contains("mode") ||
-				!child["controller"]["mode"].is_number_integer())
-				return 0;
-			try {
-				const int mode = child["controller"]["mode"].get<int>();
-				return mode >= 0 && mode <= 5 ? mode : 0;
-			}
-			catch (...) {
-				return 0;
-			}
-			};
+		auto logicGateModeForPart = [&actions](int index) { return actions.logicGateModeForPart(index); };
+		auto setSelectionLogicGateMode = [&actions](int mode) { actions.setSelectionLogicGateMode(mode); };
+		auto selectPart = [&actions](int index, bool additive) { actions.selectPart(index, additive); };
+		auto selectAllOfType = [&actions](const std::string& shapeId) { actions.selectAllOfType(shapeId); };
+		auto controllerBearingSettings = [&actions](int index) { return actions.controllerBearingSettings(index); };
+		auto setControllerBearingAngle = [&actions](int index, std::int64_t jointId, int frame, int angle) {
+			return actions.setControllerBearingAngle(index, jointId, frame, angle);
+		};
+		auto setControllerBearingReverse = [&actions](int index, std::int64_t jointId, bool reverse) {
+			return actions.setControllerBearingReverse(index, jointId, reverse);
+		};
 		ImGui::Begin("Blueprint Editor");
 		const ImGuiIO& io = ImGui::GetIO();
 		const bool shortcutReady = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput &&
@@ -243,8 +228,8 @@ namespace BlueprintViewport {
 			ImGui::SameLine();
 		if (state.logicManipulation)
 			ImGui::TextWrapped("Click a source, then targets. Click the source again to wire it into "
-				"itself. Shift-click to switch sources; click empty space to clear "
-				"selection. Click an arrow to remove a link. Esc exits.");
+				"itself. Shift-click to switch sources; click empty space or right-click to "
+				"clear selection. Click an arrow to remove a link. Esc exits.");
 		if (logicButtonWasActive)
 			ImGui::PopStyleColor(3);
 		float avail = ImGui::GetContentRegionAvail().x;
@@ -264,7 +249,7 @@ namespace BlueprintViewport {
 		if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {
 			ImVec2 d = ImGui::GetIO().MouseDelta;
 			state.yaw += d.x * .008f;
-			state.pitch = std::clamp(state.pitch + d.y * .008f, .08f, 1.35f);
+			state.pitch = std::clamp(state.pitch + d.y * .008f, -1.35f, 1.35f);
 		}
 		if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
 			ImVec2 d = ImGui::GetIO().MouseDelta;
@@ -879,10 +864,10 @@ namespace BlueprintViewport {
 			}
 			dl->PopClipRect();
 			std::string guidance = state.logicSource >= 0 ? "LOGIC SOURCE: part " + std::to_string(state.logicSource + 1) +
-				"  ·  click targets  ·  Shift-click changes source  ·  empty "
-				"space clears selection  ·  arrows remove  ·  Esc exits"
+				"  ·  click targets  ·  Shift-click changes source  ·  right-click "
+				"clears selection  ·  arrows remove  ·  Esc exits"
 				: "LOGIC MODE  ·  click source, then targets  ·  click source to "
-				"wire into itself  ·  arrows remove  ·  Esc exits";
+				"wire into itself  ·  right-click clears selection  ·  arrows remove  ·  Esc exits";
 			const float hintWrapWidth = std::max(80.f, size.x - 36.f);
 			const ImVec2 labelSize = ImGui::CalcTextSize(guidance.c_str(), nullptr, false, hintWrapWidth);
 			const ImVec2 labelPos(origin.x + 12.f, origin.y + 12.f);
@@ -1022,6 +1007,17 @@ namespace BlueprintViewport {
 				state.dragWorldPerPixel = handle.worldPerPixel;
 			}
 		}
+		const float rightDragThreshold = ImGui::GetIO().MouseDragThreshold;
+		const bool rightClick = ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+			ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < rightDragThreshold * rightDragThreshold;
+		if (hovered && state.logicManipulation && rightClick) {
+			state.logicSource = -1;
+			state.selection = -1;
+			state.selectionSet.clear();
+			state.dragSelection.clear();
+			state.dragAxis = 0;
+			notify("Selection cleared");
+		}
 		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 			state.dragSelection.clear();
 			state.dragAxis = 0;
@@ -1052,7 +1048,9 @@ namespace BlueprintViewport {
 		ImGui::SameLine();
 		renderInspector(InspectorContext{ blocks, items, inspector, coarsePreview, moveSelection, synchronizeJointPositions,
 										 selectedWorldSize, setSelectionColor, removeSelection,
-										 logicGateModeForPart });
+										 logicGateModeForPart, setSelectionLogicGateMode, partDisplayName,
+										 controllerBearingSettings, setControllerBearingAngle,
+										 setControllerBearingReverse, selectPart, selectAllOfType });
 		json frameSnapshot = blueprint;
 		Parser::applyBlockListToNode(blocks, frameSnapshot);
 		if (state.blueprintHistory.empty()) {

@@ -6,10 +6,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <string>
 
 namespace BlueprintViewport::Internal {
 void renderInspector(const InspectorContext &context) {
+  constexpr const char *controllerShapeId = "12862001-666c-4bdd-8326-a1f43610d28b";
+  constexpr const char *logicGateShapeId = "9f0f56e8-2c31-4d83-996c-d00a9b296c3f";
   auto &blocks = context.blocks;
   const auto &items = context.items;
   const float inspector = context.width;
@@ -24,6 +27,100 @@ void renderInspector(const InspectorContext &context) {
   ImGui::PushTextWrapPos(0.f);
   ImGui::Text("INSPECTOR");
   ImGui::Separator();
+  if (ImGui::Button("Find parts...", ImVec2(-1, 0)))
+    ImGui::OpenPopup("FindPartsPopup");
+  ImGui::SetNextWindowSize(ImVec2(400.f, 460.f), ImGuiCond_Appearing);
+  if (ImGui::BeginPopup("FindPartsPopup")) {
+    static char partSearch[128] = "";
+    ImGui::Text("Find a part by type");
+    ImGui::TextDisabled("Select one part, or select every part of a type.");
+    ImGui::SetNextItemWidth(-1.f);
+    ImGui::InputTextWithHint("##PartSearch", "Search part names...", partSearch, sizeof(partSearch));
+    ImGui::Spacing();
+
+    struct PartGroup {
+      std::string shapeId;
+      std::string name;
+      std::vector<int> indices;
+    };
+    std::map<std::string, PartGroup> groupsByShape;
+    for (int index = 0; index < (int)blocks.size(); ++index) {
+      const auto &part = blocks[index];
+      if (part.isJoint)
+        continue;
+      const std::string shape = lower(part.shapeID);
+      auto &group = groupsByShape[shape];
+      group.shapeId = shape;
+      if (group.name.empty()) {
+        group.name = context.partDisplayName ? context.partDisplayName(index) :
+                                               Parser::findBlockNameByShapeID(part.shapeID, items);
+        if (group.name.empty() || group.name == "part") {
+          const auto catalogEntry = state.catalog.find(shape);
+          if (catalogEntry != state.catalog.end() && !catalogEntry->second.name.empty())
+            group.name = displayNameFromShapeSet(catalogEntry->second.name);
+        }
+        if (group.name.empty() || group.name == "part")
+          group.name = "Unknown part · " + part.shapeID.substr(0, std::min<std::size_t>(8, part.shapeID.size()));
+      }
+      group.indices.push_back(index);
+    }
+
+    const std::string query = lower(partSearch);
+    std::vector<const PartGroup *> visibleGroups;
+    int visibleTypes = 0;
+    int visibleParts = 0;
+    for (const auto &[shape, group] : groupsByShape) {
+      if (query.empty() || lower(group.name).find(query) != std::string::npos || shape.find(query) != std::string::npos) {
+        ++visibleTypes;
+        visibleParts += static_cast<int>(group.indices.size());
+        visibleGroups.push_back(&group);
+      }
+    }
+    std::sort(visibleGroups.begin(), visibleGroups.end(), [](const PartGroup *left, const PartGroup *right) {
+      const std::string leftName = lower(left->name);
+      const std::string rightName = lower(right->name);
+      return leftName != rightName ? leftName < rightName : left->shapeId < right->shapeId;
+    });
+    ImGui::TextDisabled("%d types · %d parts", visibleTypes, visibleParts);
+    ImGui::BeginChild("PartSearchResults", ImVec2(0.f, 0.f), true);
+    if (visibleTypes == 0) {
+      ImGui::TextDisabled("No parts match this search.");
+    } else {
+      for (const PartGroup *groupPointer : visibleGroups) {
+        const PartGroup &group = *groupPointer;
+        const std::string &shape = group.shapeId;
+        ImGui::PushID(shape.c_str());
+        const std::string header = group.name + " (" + std::to_string(group.indices.size()) + ")";
+        const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Framed |
+                                         (query.empty() ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_DefaultOpen);
+        const bool expanded = ImGui::TreeNodeEx("##partType", flags, "%s", header.c_str());
+        if (expanded) {
+          ImGui::BeginDisabled(state.logicManipulation);
+          if (ImGui::Button("Select All##type", ImVec2(-1.f, 0.f)))
+            if (context.selectAllOfType)
+              context.selectAllOfType(group.shapeId);
+          ImGui::EndDisabled();
+          if (state.logicManipulation && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Stop Logic Editing before selecting a group.");
+          for (int index : group.indices) {
+            const auto &part = blocks[index];
+            const std::string label = "Part " + std::to_string(index + 1) + "  ·  (" +
+                                      std::to_string(part.pos.x) + ", " + std::to_string(part.pos.y) + ", " +
+                                      std::to_string(part.pos.z) + ")";
+            ImGui::PushID(index);
+            const bool selected = index == state.selection || state.selectionSet.contains(index);
+            if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_NoAutoClosePopups) && context.selectPart)
+              context.selectPart(index, ImGui::GetIO().KeyShift);
+            ImGui::PopID();
+          }
+          ImGui::TreePop();
+        }
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndChild();
+    ImGui::EndPopup();
+  }
   if (state.selection < 0 || state.selection >= (int)blocks.size())
     ImGui::TextDisabled("Click a block in the viewport to edit it.");
   else {
@@ -44,11 +141,101 @@ void renderInspector(const InspectorContext &context) {
       ImGui::TextDisabled("Joint %d  ·  render pivot at attachment A", b.jointIndex + 1);
     else
       ImGui::TextDisabled("Part %d of %d  ·  body %d", state.selection + 1, (int)blocks.size(), b.bodyIndex + 1);
-    if (!b.isJoint &&
-        lower(b.shapeID) == "9f0f56e8-2c31-4d83-996c-d00a9b296c3f") {
-      const int mode = context.logicGateMode ? context.logicGateMode(state.selection) : 0;
-      ImGui::TextColored(ImVec4(.40f, .88f, .94f, 1.f), "Logic setting: %s",
-                         logicGateModeName(mode));
+    int logicGateSettingsPart = -1;
+    int selectedLogicGateCount = 0;
+    for (int index : state.selectionSet)
+      if (index >= 0 && index < (int)blocks.size() && !blocks[index].isJoint &&
+          lower(blocks[index].shapeID) == logicGateShapeId) {
+        ++selectedLogicGateCount;
+        if (logicGateSettingsPart < 0)
+          logicGateSettingsPart = index;
+      }
+    if (state.selection >= 0 && state.selection < (int)blocks.size() && !blocks[state.selection].isJoint &&
+        lower(blocks[state.selection].shapeID) == logicGateShapeId) {
+      logicGateSettingsPart = state.selection;
+      if (!state.selectionSet.contains(state.selection))
+        ++selectedLogicGateCount;
+    }
+    if (logicGateSettingsPart >= 0) {
+      ImGui::Spacing();
+      ImGui::SeparatorText("Logic gate settings");
+      if (selectedLogicGateCount > 1)
+        ImGui::TextDisabled("Applies to %d selected logic gates.", selectedLogicGateCount);
+      int mode = context.logicGateMode ? context.logicGateMode(logicGateSettingsPart) : 0;
+      ImGui::SetNextItemWidth(-1.f);
+      if (ImGui::Combo("Gate operation", &mode, "AND\0OR\0XOR\0NAND\0NOR\0XNOR\0") &&
+          context.setSelectionLogicGateMode)
+        context.setSelectionLogicGateMode(mode);
+      ImGui::TextDisabled("Choose how this gate combines its logic inputs.");
+    }
+    const std::string selectedPartName = context.partDisplayName
+                                             ? context.partDisplayName(state.selection)
+                                             : Parser::findBlockNameByShapeID(b.shapeID, items);
+    if (!b.isJoint && (lower(b.shapeID) == controllerShapeId || lower(selectedPartName) == "controller")) {
+      static int controllerSettingsPart = -1;
+      ImGui::Spacing();
+      ImGui::SeparatorText("Controller settings");
+      ImGui::TextDisabled("Edit the bearing rotation steps for this controller.");
+      if (ImGui::Button("Edit bearing rotations...", ImVec2(-1.f, 0.f))) {
+        controllerSettingsPart = state.selection;
+        ImGui::OpenPopup("ControllerRotationEditor");
+      }
+      ImGui::SetNextWindowSize(ImVec2(860.f, 620.f), ImGuiCond_Appearing);
+      if (ImGui::BeginPopupModal("ControllerRotationEditor", nullptr, ImGuiWindowFlags_NoResize)) {
+        std::string controllerName = context.partDisplayName ? context.partDisplayName(controllerSettingsPart) : "Controller";
+        ImGui::TextWrapped("%s · connected bearing rotations", controllerName.c_str());
+        ImGui::TextDisabled("Frame 0 is the starting angle. Frames 1–10 set the rotation steps in degrees.");
+        ImGui::Separator();
+        const auto bearings = context.controllerBearingSettings ?
+                                  context.controllerBearingSettings(controllerSettingsPart) :
+                                  std::vector<EditingActions::ControllerBearingSettings>{};
+        ImGui::BeginChild("ControllerRotationList", ImVec2(0.f, -ImGui::GetFrameHeightWithSpacing() - 6.f), true);
+        if (bearings.empty()) {
+          ImGui::TextDisabled("No connected bearings with saved rotation settings were found.");
+          ImGui::TextWrapped("Connect a bearing to this Controller in Scrap Mechanic, then reopen the blueprint here.");
+        } else {
+          for (const auto &bearing : bearings) {
+            ImGui::PushID(std::to_string(bearing.jointId).c_str());
+            ImGui::Text("%s · connection %d", bearing.name.c_str(), bearing.connectionIndex + 1);
+            ImGui::SameLine();
+            bool reverse = bearing.reverse;
+            if (ImGui::Checkbox("Reverse direction", &reverse) && context.setControllerBearingReverse)
+              context.setControllerBearingReverse(controllerSettingsPart, bearing.jointId, reverse);
+            if (bearing.frameAngles.empty()) {
+              ImGui::TextDisabled("No rotation frames are stored for this bearing.");
+            } else if (ImGui::BeginTable("RotationFrames", 5,
+                                         ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
+                                             ImGuiTableFlags_SizingStretchSame)) {
+              for (int firstFrame = 0; firstFrame < (int)bearing.frameAngles.size(); firstFrame += 5) {
+                ImGui::TableNextRow();
+                for (int column = 0; column < 5; ++column) {
+                  const int frameIndex = firstFrame + column;
+                  if (frameIndex >= (int)bearing.frameAngles.size())
+                    break;
+                  ImGui::TableSetColumnIndex(column);
+                  if (frameIndex == 0)
+                    ImGui::TextUnformatted("Frame 0 · Start");
+                  else
+                    ImGui::Text("Frame %d", frameIndex);
+                  ImGui::PushID(frameIndex);
+                  int angle = bearing.frameAngles[frameIndex];
+                  ImGui::SetNextItemWidth(-1.f);
+                  if (ImGui::InputInt("##targetAngle", &angle, 0, 0) && context.setControllerBearingAngle)
+                    context.setControllerBearingAngle(controllerSettingsPart, bearing.jointId, frameIndex, angle);
+                  ImGui::PopID();
+                }
+              }
+              ImGui::EndTable();
+            }
+            ImGui::Spacing();
+            ImGui::PopID();
+          }
+        }
+        ImGui::EndChild();
+        if (ImGui::Button("Done", ImVec2(120.f, 0.f)))
+          ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+      }
     }
     if (multiSelection && !b.isJoint) {
       if (ImGui::Button("Stack selected parts at active position")) {
@@ -58,7 +245,7 @@ void renderInspector(const InspectorContext &context) {
             blocks[index].pos = target;
         synchronizeJointPositions();
       }
-      ImGui::TextDisabled("When enabled, movement keeps all selected parts at that position.");
+      ImGui::TextDisabled("Aligns the selected non-joint parts to the active part's position once.");
     }
     ImGui::Spacing();
     ImGui::Text("Position");

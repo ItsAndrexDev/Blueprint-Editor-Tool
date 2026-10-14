@@ -1,110 +1,159 @@
 # Scrap Mechanic Blueprint Editor
-An independent desktop project for viewing and editing Scrap Mechanic blueprints outside the game. It turns a saved blueprint into a 3D scene so you can select parts, change their placement and appearance, and save the result without editing blueprint JSON by hand.
 
-The recent Scrap Mechanic update broke older external blueprint editors. This project is being developed as the currently working standalone editor for the updated game, with direct access to your saved blueprints and the game’s part models.
+Scrap Mechanic Blueprint Editor is a Windows desktop tool for viewing and editing creations outside the game. It reads blueprints from your Scrap Mechanic user folder, displays them in a 3D viewport, and saves your edits back to the selected blueprint.
 
-## What it does
-<img width="1919" height="1029" alt="image" src="https://github.com/user-attachments/assets/8506f7a5-f254-4771-9e5d-e89aa9e03d49" />
+It is an independent fan project and is not affiliated with Axolot Games.
 
-- Finds and lists blueprints in your Scrap Mechanic user folder.
-- Searches the list and refreshes it when blueprints are added.
-- Displays blueprint parts in a 3D viewport, loading FBX or game mesh assets when supported. Parts without a supported model use a fallback preview.
-- Selects individual parts or groups of parts for editing.
-- Moves parts, rotates their orientation, changes colors, resizes supported blocks, and removes selected parts.
-- Saves edits back to the selected blueprint’s existing folder.
-- Warns about Survival-only parts that prevent a blueprint from loading in Creative mode.
+![Blueprint loader](https://github.com/user-attachments/assets/8506f7a5-f254-4771-9e5d-e89aa9e03d49)
 
-## Getting started
+## Contents
 
-1. Launch the editor. The **Blueprint Loader** lists blueprints found in your Scrap Mechanic user folder.
-2. Search by name, or press **Refresh** to scan the folder again.
-3. Select a blueprint to open it in the 3D editor.
-4. Select parts in the viewport and edit them with the Inspector or the viewport controls.
-5. Press **Save Blueprint** or **Ctrl+S** to write your changes to the blueprint.
+- [Open a blueprint](#open-a-blueprint)
+- [Selection and part search](#selection-and-part-search)
+- [Move, rotate, resize, and recolor parts](#move-rotate-resize-and-recolor-parts)
+- [Logic gates and logic connections](#logic-gates-and-logic-connections)
+- [Controller bearing rotations](#controller-bearing-rotations)
+- [Copy, paste, undo, and save](#copy-paste-undo-and-save)
+- [Camera and keyboard shortcuts](#camera-and-keyboard-shortcuts)
+- [Models and compatibility](#models-and-compatibility)
+- [Build from source](#build-from-source)
+- [Help and feedback](#help-and-feedback)
 
-Use **Undo** or **Ctrl+Z** to undo an edit, and **Redo** or **Ctrl+Y** to restore it. Undo history stays with the open blueprint in the editor; save to write the current state to disk.
+## Open a blueprint
 
-The editor saves directly to the selected blueprint folder. Make a backup of important blueprints before editing.
+1. Start the editor. The **Blueprint Loader** scans the Scrap Mechanic user folder for saved blueprints.
+2. Type all or part of a blueprint name in **Search blueprints...** to filter the list. Search matches are case-sensitive.
+3. Select a blueprint’s thumbnail to open it. The count beside **Refresh** shows how many blueprints are loaded.
+4. Select **Refresh** after adding or removing blueprints to scan the folder again.
+5. In the editor, select **Back to Selection** to return to the loader.
 
-## Blueprint loader
+The editor reads blueprints from `%APPDATA%\Axolot Games\Scrap Mechanic\User\<User_...>\Blueprints`. It writes changes to the selected blueprint’s existing `blueprint.json` file when you save. Back up important blueprints before editing.
 
-- Type in **Search blueprints...** to filter the list by blueprint name. The search is case-sensitive.
-- Press **Refresh** to scan the Scrap Mechanic blueprint folder again.
-- Select a blueprint’s image to open it in the editor. **Back to Selection** returns to the loader.
-- The loader shows the number of blueprints currently found.
+## Selection and part search
 
-## Selection and movement
-<img width="1908" height="1028" alt="image" src="https://github.com/user-attachments/assets/580f48db-67dd-4ae0-bb5a-2372f3a7925d" />
+![Blueprint editor](https://github.com/user-attachments/assets/580f48db-67dd-4ae0-bb5a-2372f3a7925d)
 
-- Click a part to select it. Hold **Shift** and click other parts to add them to the selection.
-- Drag one of the **+X**, **-X**, **+Y**, **-Y**, **+Z**, or **-Z** arrows to move the entire selection along that axis.
-- The Inspector’s position fields and movement buttons also move the whole selection.
-- The active part is the last part clicked. With multiple parts selected, **Stack selected parts at active position** moves the selected non-joint parts onto the active part’s position. Subsequent movement moves the selection together.
-- Use **Copy** / **Paste** or **Ctrl+C** / **Ctrl+V** to duplicate selected parts and joints. Joints between selected parts are included automatically. Pasted parts are selected and move one additional grid unit along +X for each paste; their copied joints follow them.
-- **Copy block state (connections)** starts off. Turn it on before pasting to preserve controller settings and logic connections. Links between copied parts point to the pasted copies; links from copied parts to unselected targets stay on the originals. Unselected sources connected to copied targets also connect to the pasted copies. When off, copied controller settings reset to defaults and logic links are cleared.
-- **Gate Labels: Off/On** starts off. Turn it on to display each logic gate’s setting (`AND`, `OR`, `XOR`, `NAND`, `NOR`, or `XNOR`) over the gate in the viewport. The Inspector shows the setting for a selected logic gate regardless of this display option.
-- **Start Logic Editing** enables connection editing. Click a controller part to choose a source, then click controller targets to add directed connections. Click the source itself to connect it to itself, or Shift-click a different controller to switch sources. Click empty viewport space to clear the source and selection. Click a connection arrow to remove it. **Stop Logic Editing** or **Esc** exits the mode and restores normal selection and movement.
-- The cyan outline marks the active part; other selected parts have their own outlines.
-- Press **Delete** or click **Remove selected part(s)** in the Inspector to remove the selection. Undo can restore the removal.
+- Click a part in the viewport to select it. **Shift-click** adds another part without clearing the current selection.
+- The cyan outline marks the active part. Other selected parts are outlined too. Click empty space in normal editing mode to clear the selection.
+- Select **Find parts...** in the Inspector to search part names and browse the matching part types. Search results expand while you type. Select a row to choose one part; select **Select All** inside a type group to select every instance of that type. Hold Shift while selecting a row to add it to the current selection.
+- Some paired parts, such as the two pieces of a turret seat, are selected together automatically.
+- Most Inspector edits apply to the active part. Position changes, color changes, removal, and logic gate operations apply to the full selection where appropriate.
+- For multiple selected parts, **Stack selected parts at active position** moves selected non-joint parts onto the active part’s position in one step.
 
-Scrap Mechanic uses **Z as up**. X and Y are the horizontal axes. For resizable blocks, local Z is height and local Y is depth. When multiple parts are selected, the Dimensions panel shows the combined world-space width (X), depth (Y), and height (Z) of the selection.
+## Move, rotate, resize, and recolor parts
 
+Scrap Mechanic uses a **Z-up** coordinate system: X and Y are on the ground plane, and Z is vertical.
 
+### Move
 
-## Color and dimensions
+- Drag a colored axis arrow in the viewport to move the selection along that axis.
+- Enter X, Y, or Z coordinates in the Inspector to move the selection to that position.
+- Use **Left -X**, **Right +X**, **Forward +Y**, **Back -Y**, **Up +Z**, or **Down -Z** to move one grid unit.
+- Joints show their two attachment positions and orientation. Moving a connected part keeps the joint endpoints in sync.
 
-- Type a six-digit hex color such as `3E9FFE`, or click the color swatch to open the color picker.
-- Color edits apply to every selected part.
-- With one supported built-in block selected, use **Width**, **Height**, and **Depth** to resize it. Unsupported fixed-size parts show their footprint instead.
-- With multiple parts selected, Dimensions shows their combined size instead of individual resize controls.
-- The Inspector’s orientation controls set the part’s local X and local Z (up) axes. **Rotate +90°** and **Rotate -90°** turn the active part around local Z; **Reset rotation** restores the default orientation. Joints follow the orientation of their connected bodies.
+### Orientation
 
-## View controls
+- **Local X axis** and **Local Z axis (up)** set the active part’s orientation. The chosen axes must be perpendicular.
+- **Rotate +90°** and **Rotate -90°** rotate the part around its local Z axis. **Reset rotation** restores its default orientation.
+- Joint orientation follows the connected parts and is displayed for inspection.
+
+### Dimensions
+
+- Supported built-in blocks can be resized with **Width**, **Height**, and **Depth**. Values are limited to 1–256 grid units. In Scrap Mechanic’s Z-up coordinates, Height maps to Z and Depth maps to Y.
+- Fixed-size parts show their footprint instead of resize controls.
+- A multi-selection shows its combined world-space Width (X), Depth (Y), and Height (Z); it does not provide resize fields.
+
+### Color
+
+- Select the color swatch to open the picker, or type a six-digit hexadecimal value such as `3E9FFE` in the color field.
+- Color changes apply to all selected parts. The Inspector accepts the six hexadecimal digits without the `#` prefix.
+
+## Logic gates and logic connections
+
+Logic gates and physical Controllers are different parts and have separate settings.
+
+### Logic gate settings
+
+- Select one or more Logic Gates and choose **Gate operation** in **Logic gate settings**. The operation is applied to every selected Logic Gate: **AND**, **OR**, **XOR**, **NAND**, **NOR**, or **XNOR**.
+- Select **Gate Labels: On** to show each gate’s current operation in the viewport. Select it again to hide the labels.
+
+### Logic connections
+
+1. Select **Start Logic Editing**.
+2. Click a connectable interactive part to choose the source. Click another part to add a directed connection from the source to that target.
+3. **Shift-click** a different connectable part to switch the source. Click the source itself to connect it to itself.
+4. Click a connection arrow to remove that connection. Click empty viewport space or **right-click** to clear the source and selection while staying in Logic Editing.
+5. Select **Stop Logic Editing** or press **Esc** to leave the mode.
+
+Logic Editing changes connections between interactive parts. It does not edit a physical Controller’s bearing rotation settings.
+
+## Controller bearing rotations
+
+Select a physical **Controller** part, then use **Controller settings → Edit bearing rotations...** in the Inspector. The editor lists connected bearings with saved settings.
+
+- **Frame 0 · Start** is the bearing’s starting angle.
+- **Frames 1–10** define the rotation sequence in degrees. Edit the displayed frame values directly.
+- **Reverse direction** reverses that bearing’s sequence.
+
+These settings apply to bearings connected to the physical Controller. Engines are not Controllers and do not use this editor. If no bearings appear, connect a bearing to the Controller in Scrap Mechanic and reopen the blueprint.
+
+## Copy, paste, undo, and save
+
+- **Copy** or **Ctrl+C** copies the selected parts. Joints between copied parts are included automatically; selecting a joint also copies it.
+- **Paste** or **Ctrl+V** pastes the copied parts and joints into the same open blueprint. Each paste is offset one additional grid unit along +X, and the pasted objects become the selection.
+- **Copy block state (connections)** is off by default. Turn it on before pasting to copy interactive-part connections and Controller bearing settings. References between copied parts are redirected to the pasted copies; references to unselected parts continue to point to the originals. With the option off, copied connections and Controller settings are reset.
+- **Undo** or **Ctrl+Z** reverses the last editor change. **Redo** or **Ctrl+Y** reapplies an undone change. Undo history belongs to the currently open blueprint and is not written to disk until saved.
+- **Save Blueprint** or **Ctrl+S** writes edits to the selected blueprint’s `blueprint.json`.
+- **Delete** or **Remove selected part(s)** removes the current selection. Connected joints are updated as needed; Undo can restore removed objects.
+
+## Camera and keyboard shortcuts
+
+### Mouse controls
 
 | Action | Control |
 | --- | --- |
-| Orbit the camera | Right-drag |
+| Orbit the camera | Right-drag over the viewport; orbiting can go below the creation |
 | Pan the camera | Middle-drag |
 | Zoom the camera | Mouse wheel |
-| Return to the default camera view | **Reset view** |
-| Save the blueprint | **Ctrl+S** or **Save Blueprint** |
-| Undo the last edit | **Ctrl+Z** or **Undo** |
-| Redo an undone edit | **Ctrl+Y** or **Redo** |
-| Copy the selection | **Ctrl+C** or **Copy** |
-| Paste the copied objects | **Ctrl+V** or **Paste**; parts move along +X |
-| Remove the selection | **Delete** or **Remove selected part(s)** |
-| Add a part to the selection | **Shift-click** |
-| Exit logic editing | **Esc** or **Stop Logic Editing** |
-| Move selected parts | Drag an axis arrow, use position fields, or click a movement button |
+| Move a selected part along an axis | Drag the matching axis arrow |
+| Add a part to the selection | Shift-click |
+| Clear the selection in Logic Editing | Right-click (a right-drag still orbits the camera) |
 
-Keyboard shortcuts work while the **Blueprint Editor** window is focused and no field, UI item, or popup is taking input. Mouse controls apply while the pointer is over the 3D viewport.
+### Keyboard shortcuts
 
-## Blueprint compatibility
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl+S** | Save the open blueprint |
+| **Ctrl+Z** | Undo |
+| **Ctrl+Y** | Redo |
+| **Ctrl+C** | Copy the selection |
+| **Ctrl+V** | Paste copied parts and joints |
+| **Delete** | Remove the selection |
+| **Esc** | Exit Logic Editing |
 
-Parts marked **Survival-only** cannot be spawned in Creative mode. The editor identifies these parts and lets you select and remove them. Remove incompatible parts before using the creation in Creative, or load it in a Survival world.
+Shortcuts work while the **Blueprint Editor** window is focused and no text field, other UI control, or popup is capturing input. Mouse controls work while the pointer is over the 3D viewport. There are no keyboard shortcuts for moving or rotating parts; use the Inspector or axis arrows.
 
-Some parts, including parts from mods or unsupported game assets, may not have a model the editor can display. The blueprint data can still be edited, but the viewport may show a fallback shape for those parts.
+## Models and compatibility
 
-The Inspector’s **Scene** section reports loaded game models, built-in block previews, and parts shown with fallback boxes. For large blueprints, the editor reduces real-mesh detail to keep the viewport responsive.
+- The **Scene** section reports the part count, loaded game meshes, built-in block previews, and any parts shown with fallback boxes.
+- The editor loads available Scrap Mechanic game models when possible. Unsupported assets or modded parts may use a fallback box; their blueprint data can still be edited.
+- Large scenes may use reduced real-mesh detail to keep the viewport responsive.
+- Some blueprints contain Survival-only parts that cannot be spawned in Creative mode. The editor identifies these parts so you can remove them or use the blueprint in a Survival world.
 
-## Building from source
+## Build from source
 
-The project builds with **Visual Studio 2022**, the **v143 C++ toolset**, and the Windows SDK. The 64-bit project uses vcpkg dependencies from both the `x64-windows` and `x64-windows-static-md` triplets. Set `VCPKG_ROOT` to your vcpkg installation, or place vcpkg next to the project as expected by the project file.
+The project is a C++20 Windows application built with Visual Studio 2022, the v143 C++ toolset, and the Windows SDK. It uses vcpkg dependencies from the `x64-windows` and `x64-windows-static-md` triplets. Set `VCPKG_ROOT` to your vcpkg installation, or place vcpkg beside the project as expected by the project file.
 
-Install the dependencies if they are not already present:
+Install dependencies if needed:
 
 ```powershell
 vcpkg install glad:x64-windows nlohmann-json:x64-windows glfw3:x64-windows-static-md
 ```
 
-Open `Blueprint Editor.sln`, select **Release | x64**, and build. `items.json` is embedded into the executable during the build, and GLFW is statically linked, so neither needs to be shipped as a separate file. A Microsoft Visual C++ runtime may still be required on systems where it is not already installed.
+Open `Blueprint Editor.sln`, choose **Release | x64**, and build. `items.json` is embedded during the build. GLFW is statically linked; a Microsoft Visual C++ runtime may still be required on the target system.
 
-## Tech stack
+## Help and feedback
 
-- **C++20** for the application and editor logic.
-- **Dear ImGui** for the interface, docking, and editor panels.
-- **GLFW** for windowing and input; statically linked in the Windows build.
-- **OpenGL 3.3** with **GLAD** for rendering the 3D viewport.
-- **nlohmann-json** and the project’s `scrap_parser` for reading and writing blueprint data.
-- **Windows resources** to embed `items.json` in the executable.
-- **Visual Studio 2022 / MSVC v143** and **vcpkg** for building and dependency management.
+Use the in-app **Help** window for an editing guide. Send **all bug reports and feature requests** to Discord user **@consthater**.
+
+Developed by Andrex. This is an independent fan project and is not affiliated with Axolot Games or Scrap Mechanic.

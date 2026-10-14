@@ -169,6 +169,20 @@ public:
   json *controllerForPart(int index);
   std::int64_t controllerIdForPart(int index);
   std::string partDisplayName(int index) const;
+  int logicGateModeForPart(int index) const;
+  void setSelectionLogicGateMode(int mode);
+  struct ControllerBearingSettings {
+    std::int64_t jointId = -1;
+    int connectionIndex = -1;
+    std::string name;
+    bool reverse{};
+    std::vector<int> frameAngles;
+  };
+  std::vector<ControllerBearingSettings> controllerBearingSettings(int index);
+  bool setControllerBearingAngle(int index, std::int64_t jointId, int frameIndex, int angle);
+  bool setControllerBearingReverse(int index, std::int64_t jointId, bool reverse);
+  void selectPart(int index, bool additive);
+  void selectAllOfType(const std::string &shapeId);
   void addSelectionGroup(int index);
   void synchronizeJointPositions();
   void moveSelection(int x, int y, int z);
@@ -202,6 +216,13 @@ struct InspectorContext {
   std::function<void(const std::string &)> setSelectionColor;
   std::function<bool()> removeSelection;
   std::function<int(int)> logicGateMode;
+  std::function<void(int)> setSelectionLogicGateMode;
+  std::function<std::string(int)> partDisplayName;
+  std::function<std::vector<EditingActions::ControllerBearingSettings>(int)> controllerBearingSettings;
+  std::function<bool(int, std::int64_t, int, int)> setControllerBearingAngle;
+  std::function<bool(int, std::int64_t, bool)> setControllerBearingReverse;
+  std::function<void(int, bool)> selectPart;
+  std::function<void(const std::string &)> selectAllOfType;
 };
 void renderInspector(const InspectorContext &context);
 } // namespace BlueprintViewport::Internal
