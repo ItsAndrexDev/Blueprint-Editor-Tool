@@ -246,7 +246,7 @@ bool EditingActions::setControllerBearingReverse(int index, std::int64_t jointId
 }
 
 void EditingActions::selectPart(int index, bool additive) {
-  if (index < 0 || index >= (int)blocks_.size() || blocks_[index].isJoint)
+  if (index < 0 || index >= (int)blocks_.size())
     return;
   if (state.logicManipulation) {
     if (controllerIdForPart(index) < 0) {
@@ -268,22 +268,29 @@ void EditingActions::selectPart(int index, bool additive) {
   state.dragAxis = 0;
 }
 
-void EditingActions::selectAllOfType(const std::string &shapeId) {
+void EditingActions::selectAllOfType(const std::string &shapeId, bool additive) {
   const std::string wanted = lower(shapeId);
-  state.selectionSet.clear();
-  state.selection = -1;
+  if (!additive) {
+    state.selectionSet.clear();
+    state.selection = -1;
+  }
+  int firstMatch = -1;
+  size_t added = 0;
   for (int index = 0; index < (int)blocks_.size(); ++index) {
     const auto &part = blocks_[index];
-    if (!part.isJoint && lower(part.shapeID) == wanted) {
-      state.selectionSet.insert(index);
-      if (state.selection < 0)
-        state.selection = index;
+    if (lower(part.shapeID) == wanted) {
+      if (firstMatch < 0)
+        firstMatch = index;
+      added += state.selectionSet.insert(index).second ? 1 : 0;
     }
   }
+  if (firstMatch >= 0)
+    state.selection = firstMatch;
   state.stackSelection = false;
   state.dragSelection.clear();
   state.dragAxis = 0;
-  BlueprintViewport::notify("Selected " + std::to_string(state.selectionSet.size()) + " part(s) of this type");
+  BlueprintViewport::notify("Added " + std::to_string(added) + " part(s) of this type; " +
+                            std::to_string(state.selectionSet.size()) + " selected total");
 }
 
 void EditingActions::addTurretSeatSelection(int index) {

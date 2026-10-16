@@ -113,8 +113,8 @@ void renderHelpPage(ImGuiID loaderDockId) {
 
 	ImGui::SeparatorText("2. Select and find parts");
 	ImGui::BulletText("Click a part in the viewport to select it. Shift-click adds another part. Click empty space in normal editing mode to clear the selection. The cyan outline marks the active part.");
-	ImGui::BulletText("Find parts... in the Inspector searches part names without regard to case. Expand a type to see its instances, click a row to select one, or click Select All within that type to select every matching part.");
-	ImGui::BulletText("Hold Shift while clicking a part row to add it to the current selection. Some paired parts, such as turret-seat pieces, are selected together automatically.");
+	ImGui::BulletText("Find parts... in the Inspector searches part names without regard to case. Expand a type to see its instances, click a row to select one, or click Select All within that type to select every matching part. Joint parts such as bearings and suspensions are included.");
+	ImGui::BulletText("Hold Shift while clicking a part row or Select All to add those parts to the current selection instead of replacing it. Some paired parts, such as turret-seat pieces, are selected together automatically.");
 	ImGui::BulletText("The active part is the last selected part. Multi-selection movement, color, removal, and other supported bulk edits use the whole selection.");
 	ImGui::Spacing();
 

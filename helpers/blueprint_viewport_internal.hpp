@@ -182,7 +182,7 @@ public:
   bool setControllerBearingAngle(int index, std::int64_t jointId, int frameIndex, int angle);
   bool setControllerBearingReverse(int index, std::int64_t jointId, bool reverse);
   void selectPart(int index, bool additive);
-  void selectAllOfType(const std::string &shapeId);
+  void selectAllOfType(const std::string &shapeId, bool additive);
   void addSelectionGroup(int index);
   void synchronizeJointPositions();
   void moveSelection(int x, int y, int z);
@@ -222,7 +222,7 @@ struct InspectorContext {
   std::function<bool(int, std::int64_t, int, int)> setControllerBearingAngle;
   std::function<bool(int, std::int64_t, bool)> setControllerBearingReverse;
   std::function<void(int, bool)> selectPart;
-  std::function<void(const std::string &)> selectAllOfType;
+  std::function<void(const std::string &, bool)> selectAllOfType;
 };
 void renderInspector(const InspectorContext &context);
 } // namespace BlueprintViewport::Internal

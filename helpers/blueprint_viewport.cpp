@@ -125,7 +125,9 @@ namespace BlueprintViewport {
 		auto logicGateModeForPart = [&actions](int index) { return actions.logicGateModeForPart(index); };
 		auto setSelectionLogicGateMode = [&actions](int mode) { actions.setSelectionLogicGateMode(mode); };
 		auto selectPart = [&actions](int index, bool additive) { actions.selectPart(index, additive); };
-		auto selectAllOfType = [&actions](const std::string& shapeId) { actions.selectAllOfType(shapeId); };
+		auto selectAllOfType = [&actions](const std::string& shapeId, bool additive) {
+			actions.selectAllOfType(shapeId, additive);
+		};
 		auto controllerBearingSettings = [&actions](int index) { return actions.controllerBearingSettings(index); };
 		auto setControllerBearingAngle = [&actions](int index, std::int64_t jointId, int frame, int angle) {
 			return actions.setControllerBearingAngle(index, jointId, frame, angle);

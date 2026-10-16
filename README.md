@@ -41,7 +41,7 @@ The editor reads blueprints from `%APPDATA%\Axolot Games\Scrap Mechanic\User\<Us
 
 - Click a part in the viewport to select it. **Shift-click** adds another part without clearing the current selection.
 - The cyan outline marks the active part. Other selected parts are outlined too. Click empty space in normal editing mode to clear the selection.
-- Select **Find parts...** in the Inspector to search part names and browse the matching part types. Search results expand while you type. Select a row to choose one part; select **Select All** inside a type group to select every instance of that type. Hold Shift while selecting a row to add it to the current selection.
+- Select **Find parts...** in the Inspector to search part names and browse matching types, including joint parts such as bearings and suspensions. Search results expand while you type. Select a row to choose one part; select **Select All** inside a type group to select every instance of that type. Hold Shift while selecting a row or **Select All** to add it to the current selection instead of replacing it.
 - Some paired parts, such as the two pieces of a turret seat, are selected together automatically.
 - Most Inspector edits apply to the active part. Position changes, color changes, removal, and logic gate operations apply to the full selection where appropriate.
 - For multiple selected parts, **Stack selected parts at active position** moves selected non-joint parts onto the active part’s position in one step.

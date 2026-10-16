@@ -32,8 +32,9 @@ void renderInspector(const InspectorContext &context) {
   ImGui::SetNextWindowSize(ImVec2(400.f, 460.f), ImGuiCond_Appearing);
   if (ImGui::BeginPopup("FindPartsPopup")) {
     static char partSearch[128] = "";
-    ImGui::Text("Find a part by type");
-    ImGui::TextDisabled("Select one part, or select every part of a type.");
+    ImGui::Text("Find parts by type");
+    ImGui::TextDisabled("Select a row, or select every part in a type group.");
+    ImGui::TextDisabled("Hold Shift while selecting Select All to add a type to your current selection.");
     ImGui::SetNextItemWidth(-1.f);
     ImGui::InputTextWithHint("##PartSearch", "Search part names...", partSearch, sizeof(partSearch));
     ImGui::Spacing();
@@ -46,8 +47,6 @@ void renderInspector(const InspectorContext &context) {
     std::map<std::string, PartGroup> groupsByShape;
     for (int index = 0; index < (int)blocks.size(); ++index) {
       const auto &part = blocks[index];
-      if (part.isJoint)
-        continue;
       const std::string shape = lower(part.shapeID);
       auto &group = groupsByShape[shape];
       group.shapeId = shape;
@@ -98,13 +97,14 @@ void renderInspector(const InspectorContext &context) {
           ImGui::BeginDisabled(state.logicManipulation);
           if (ImGui::Button("Select All##type", ImVec2(-1.f, 0.f)))
             if (context.selectAllOfType)
-              context.selectAllOfType(group.shapeId);
+              context.selectAllOfType(group.shapeId, ImGui::GetIO().KeyShift);
           ImGui::EndDisabled();
           if (state.logicManipulation && ImGui::IsItemHovered())
             ImGui::SetTooltip("Stop Logic Editing before selecting a group.");
           for (int index : group.indices) {
             const auto &part = blocks[index];
-            const std::string label = "Part " + std::to_string(index + 1) + "  ·  (" +
+            const std::string label = std::string(part.isJoint ? "Joint " : "Part ") +
+                                      std::to_string(index + 1) + "  ·  (" +
                                       std::to_string(part.pos.x) + ", " + std::to_string(part.pos.y) + ", " +
                                       std::to_string(part.pos.z) + ")";
             ImGui::PushID(index);
