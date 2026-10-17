@@ -83,6 +83,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)includes;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -98,6 +100,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)includes;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -112,7 +116,7 @@
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(VcpkgRoot)\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)includes;$(VcpkgRoot)\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(VcpkgRoot)\installed\x64-windows-static-md\lib;$(VcpkgRoot)\installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -131,7 +135,7 @@
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(VcpkgRoot)\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)includes;$(VcpkgRoot)\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(VcpkgRoot)\installed\x64-windows-static-md\lib;$(VcpkgRoot)\installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -143,46 +147,66 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="gui_manager.cpp" />
-    <ClCompile Include="helpers\AptosFont.hpp" />
-    <ClCompile Include="helpers\blueprint_viewport.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_actions.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_catalog.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_model_loader.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_fbx.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_dae.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_ogre.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_renderer.cpp" />
-    <ClCompile Include="helpers\blueprint_viewport_inspector.cpp" />
-    <ClCompile Include="imgui\imgui.cpp" />
-    <ClCompile Include="imgui\imgui_demo.cpp" />
-    <ClCompile Include="imgui\imgui_draw.cpp" />
-    <ClCompile Include="imgui\imgui_impl_glfw.cpp" />
-    <ClCompile Include="imgui\imgui_impl_opengl3.cpp" />
-    <ClCompile Include="imgui\imgui_tables.cpp" />
-    <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_actions.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas_gizmo.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas_input.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas_logic.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas_scene.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_catalog.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_controller_actions.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_inspector_scene.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_model_loader.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_fbx.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_fbx_binary.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_dae.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_ogre.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_renderer.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_inspector.cpp" />
+    <ClCompile Include="includes\imgui\imgui.cpp" />
+    <ClCompile Include="includes\imgui\imgui_demo.cpp" />
+    <ClCompile Include="includes\imgui\imgui_draw.cpp" />
+    <ClCompile Include="includes\imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="includes\imgui\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="includes\imgui\imgui_tables.cpp" />
+    <ClCompile Include="includes\imgui\imgui_widgets.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="helpers\scrap_parser.cpp" />
+    <ClCompile Include="menu_helper.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_parser.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_clipboard.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_clipboard_paste.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_blueprint_connections.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_blueprint_io.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_blueprint_removal.cpp" />
+    <ClCompile Include="helpers\scrap\scrap_item_lookup.cpp" />
+    <ClCompile Include="helpers\blueprint\blueprint_viewport_shapes.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="items.rc" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gui_manager.hpp" />
-    <ClInclude Include="imgui\imconfig.h" />
-    <ClInclude Include="imgui\imgui.h" />
-    <ClInclude Include="imgui\imgui_impl_glfw.h" />
-    <ClInclude Include="imgui\imgui_impl_opengl3.h" />
-    <ClInclude Include="imgui\imgui_internal.h" />
-    <ClInclude Include="imgui\imstb_rectpack.h" />
-    <ClInclude Include="imgui\imstb_textedit.h" />
-    <ClInclude Include="imgui\imstb_truetype.h" />
-    <ClInclude Include="helpers\scrap_parser.hpp" />
+    <ClInclude Include="includes\imgui\imconfig.h" />
+    <ClInclude Include="includes\imgui\imgui.h" />
+    <ClInclude Include="includes\imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="includes\imgui\imgui_impl_opengl3.h" />
+    <ClInclude Include="includes\imgui\imgui_internal.h" />
+    <ClInclude Include="includes\imgui\imstb_rectpack.h" />
+    <ClInclude Include="includes\imgui\imstb_textedit.h" />
+    <ClInclude Include="includes\imgui\imstb_truetype.h" />
+    <ClInclude Include="helpers\scrap\scrap_parser.hpp" />
+    <ClInclude Include="includes\AptosFont.hpp" />
+    <ClInclude Include="helpers\scrap\scrap_parser_internal.hpp" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="helpers\blueprint_viewport.hpp" />
-    <ClInclude Include="helpers\blueprint_viewport_internal.hpp" />
-    <ClInclude Include="helpers\fbx_inflate.hpp" />
-    <ClInclude Include="helpers\stb_image.h" />
+    <ClInclude Include="helpers\blueprint\blueprint_viewport.hpp" />
+    <ClInclude Include="helpers\blueprint\blueprint_viewport_internal.hpp" />
+    <ClInclude Include="helpers\blueprint\blueprint_viewport_canvas.hpp" />
+    <ClInclude Include="helpers\blueprint\blueprint_viewport_fbx_binary.hpp" />
+    <ClInclude Include="helpers\blueprint\fbx_inflate.hpp" />
+    <ClInclude Include="includes\stb_image.h" />
     <ClInclude Include="menu_helper.hpp" />
+    <ClInclude Include="help_page.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
