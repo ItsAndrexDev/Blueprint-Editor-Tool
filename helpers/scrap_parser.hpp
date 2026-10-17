@@ -25,6 +25,8 @@ struct Position { int x = 0, y = 0, z = 0; };
 struct ClipboardChild {
 	int sourceBodyIndex = -1;
 	int sourceFlatIndex = -1;
+	// Partial copies stay attached to their source body; full-body copies get a new body.
+	bool sourceBodyFullySelected = false;
 	json data;
 };
 

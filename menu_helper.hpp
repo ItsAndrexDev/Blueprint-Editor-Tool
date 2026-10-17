@@ -131,6 +131,7 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::BulletText("Logic Gate settings are separate from physical Controller settings. Select one or more Logic Gates and choose AND, OR, XOR, NAND, NOR, or XNOR under Logic gate settings. The chosen operation applies to selected gates.");
 	ImGui::BulletText("Gate Labels: On displays each logic gate's current operation in the viewport. Select it again to hide labels.");
 	ImGui::BulletText("Start Logic Editing to edit directed connections between interactive parts. Click a connectable part to choose a source, then click a target to connect it. Shift-click another part to switch the source; click the source itself to connect it to itself.");
+	ImGui::BulletText("Show all connections while editing is off by default. With a source selected, it shows only arrows to or from that source. Turn it on to show every connection. With no source selected, all connections stay visible so you can choose one. Its button shows On or Off, is available during Logic Editing, and resets to Off when you exit the mode.");
 	ImGui::BulletText("Click a connection arrow to remove that connection. Click empty viewport space or right-click to clear the source and selection while staying in Logic Editing. Stop Logic Editing or Esc exits the mode.");
 	ImGui::Spacing();
 
@@ -140,7 +141,7 @@ void renderHelpPage(ImGuiID loaderDockId) {
 	ImGui::Spacing();
 
 	ImGui::SeparatorText("6. Copy, paste, and history");
-	ImGui::BulletText("Copy duplicates selected parts and joints. Joints connecting selected parts are included automatically. Paste places the copy one additional grid unit along +X for each paste and selects the pasted objects.");
+	ImGui::BulletText("Copy duplicates selected parts and joints. Joints connecting selected parts are included automatically. Paste places the copy one additional grid unit along +X for each paste and selects the pasted objects. A partial-body copy stays in its source body; copying every part in a body creates a separate body copy.");
 	ImGui::BulletText("Copy block state (connections) is off by default. Turn it on before pasting to preserve interactive connections and physical Controller bearing settings. Connections between copied parts point to their copies; links to unselected parts remain connected to the originals. With the option off, copied connection and Controller state is reset.");
 	ImGui::BulletText("Undo and Redo are available from the toolbar and keyboard. The history is for the open blueprint and is not saved until you select Save Blueprint.");
 	ImGui::Spacing();

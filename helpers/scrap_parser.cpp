@@ -222,6 +222,7 @@ bool Parser::captureSelectionClipboard(const json& blueprint, const std::vector<
 	clipboard.copyBlockState = copyBlockState;
 	if (!blueprint.is_object() || !blueprint.contains("bodies") || !blueprint["bodies"].is_array())return false;
 	std::unordered_set<int> selectedBlocks, selectedChildFlats, selectedJointIndices;
+	std::unordered_map<int, size_t> selectedChildrenPerBody;
 	for (int index : selection) {
 		if (index < 0 || index >= (int)blocks.size() || !selectedBlocks.insert(index).second)continue;
 		const auto& block = blocks[index];
@@ -237,7 +238,13 @@ bool Parser::captureSelectionClipboard(const json& blueprint, const std::vector<
 		const auto& child = body["childs"][block.childIndex];
 		if (!child.is_object())continue;
 		selectedChildFlats.insert(flat);
-		clipboard.children.push_back({ block.bodyIndex,flat,child });
+		++selectedChildrenPerBody[block.bodyIndex];
+		clipboard.children.push_back({ block.bodyIndex,flat,false,child });
+	}
+	for (auto& copiedChild : clipboard.children) {
+		const auto& sourceBody = blueprint["bodies"][copiedChild.sourceBodyIndex];
+		copiedChild.sourceBodyFullySelected = sourceBody.contains("childs") && sourceBody["childs"].is_array() &&
+			selectedChildrenPerBody[copiedChild.sourceBodyIndex] == sourceBody["childs"].size();
 	}
 	if (blueprint.contains("joints") && blueprint["joints"].is_array()) {
 		for (int jointIndex = 0; jointIndex < (int)blueprint["joints"].size(); ++jointIndex) {
@@ -354,24 +361,90 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 	json staged = blueprint;
 	PasteSelectionResult stagedResult;
 	std::unordered_map<int, int> newFlatBySourceFlat;
-	int existingChildCount = 0;
-	for (const auto& body : staged["bodies"])if (body.is_object() && body.contains("childs") && body["childs"].is_array())existingChildCount += (int)body["childs"].size();
-	const int originalChildCount = existingChildCount;
+	const int originalBodyCount = (int)staged["bodies"].size();
+	const size_t originalJointCount = staged.contains("joints") && staged["joints"].is_array()
+		? staged["joints"].size() : 0;
+	std::vector<int> originalBodyStarts(originalBodyCount), originalBodyChildCounts(originalBodyCount);
+	int originalChildCount = 0;
+	for (int bodyIndex = 0; bodyIndex < originalBodyCount; ++bodyIndex) {
+		originalBodyStarts[bodyIndex] = originalChildCount;
+		const auto& body = staged["bodies"][bodyIndex];
+		if (body.is_object() && body.contains("childs") && body["childs"].is_array())
+			originalBodyChildCounts[bodyIndex] = (int)body["childs"].size();
+		originalChildCount += originalBodyChildCounts[bodyIndex];
+	}
+	std::unordered_map<int, int> appendedToExistingBody;
+	std::unordered_map<int, std::pair<int, int>> newChildLocationBySourceFlat;
 	for (const auto& [sourceBody, childIndices] : childrenBySourceBody) {
-		(void)sourceBody;
-		const int newBodyIndex = (int)staged["bodies"].size();
-		json newBody = json::object();
-		newBody["childs"] = json::array();
-		for (size_t clipboardChildIndex : childIndices) {
-			const int newChildIndex = (int)newBody["childs"].size();
-			const int newFlatIndex = existingChildCount + newChildIndex;
-			const auto& source = clipboard.children[clipboardChildIndex];
-			newFlatBySourceFlat.emplace(source.sourceFlatIndex, newFlatIndex);
-			newBody["childs"].push_back(std::move(clonedChildren[clipboardChildIndex]));
-			stagedResult.children.emplace_back(newBodyIndex, newChildIndex);
+		if (childIndices.empty())
+			continue;
+		const bool copyWholeBody = clipboard.children[childIndices.front()].sourceBodyFullySelected;
+		const bool sourceBodyExists = sourceBody >= 0 && sourceBody < originalBodyCount &&
+			staged["bodies"][sourceBody].is_object() && staged["bodies"][sourceBody].contains("childs") &&
+			staged["bodies"][sourceBody]["childs"].is_array();
+		const bool appendToSourceBody = !copyWholeBody && sourceBodyExists;
+		int targetBodyIndex = -1;
+		json detachedBody;
+		json* destinationChildren = nullptr;
+		if (appendToSourceBody) {
+			targetBodyIndex = sourceBody;
+			destinationChildren = &staged["bodies"][targetBodyIndex]["childs"];
+			appendedToExistingBody[targetBodyIndex] += (int)childIndices.size();
+		} else {
+			targetBodyIndex = (int)staged["bodies"].size();
+			if (sourceBodyExists)
+				detachedBody = staged["bodies"][sourceBody];
+			else
+				detachedBody = json::object();
+			detachedBody["childs"] = json::array();
+			staged["bodies"].push_back(std::move(detachedBody));
+			destinationChildren = &staged["bodies"][targetBodyIndex]["childs"];
 		}
-		existingChildCount += (int)newBody["childs"].size();
-		staged["bodies"].push_back(std::move(newBody));
+		for (size_t clipboardChildIndex : childIndices) {
+			const int newChildIndex = (int)destinationChildren->size();
+			const auto& source = clipboard.children[clipboardChildIndex];
+			newChildLocationBySourceFlat.emplace(source.sourceFlatIndex,
+				std::pair<int, int>{targetBodyIndex, newChildIndex});
+			destinationChildren->push_back(std::move(clonedChildren[clipboardChildIndex]));
+			stagedResult.children.emplace_back(targetBodyIndex, newChildIndex);
+		}
+	}
+	// Child endpoints in joints use one flattened index across every body's childs array.
+	// Appending into an earlier body shifts the original indices of all later bodies.
+	auto remapOriginalFlatIndex = [&](int originalFlatIndex) {
+		if (originalFlatIndex < 0 || originalFlatIndex >= originalChildCount)
+			return originalFlatIndex;
+		int sourceBody = -1;
+		for (int bodyIndex = 0; bodyIndex < originalBodyCount; ++bodyIndex)
+			if (originalFlatIndex >= originalBodyStarts[bodyIndex] &&
+				originalFlatIndex < originalBodyStarts[bodyIndex] + originalBodyChildCounts[bodyIndex]) {
+				sourceBody = bodyIndex;
+				break;
+			}
+		if (sourceBody < 0)
+			return originalFlatIndex;
+		int remapped = originalFlatIndex;
+		for (const auto& [bodyIndex, appendedCount] : appendedToExistingBody)
+			if (bodyIndex < sourceBody)
+				remapped += appendedCount;
+		return remapped;
+	};
+	for (size_t jointIndex = 0; jointIndex < originalJointCount; ++jointIndex) {
+		auto& joint = staged["joints"][jointIndex];
+		if (!joint.is_object())
+			continue;
+		for (const char* endpoint : {"childA", "childB"})
+			if (joint.contains(endpoint) && joint[endpoint].is_number_integer())
+				try {
+					const int childIndex = joint[endpoint].get<int>();
+					joint[endpoint] = remapOriginalFlatIndex(childIndex);
+				} catch (...) {}
+	}
+	for (const auto& [sourceFlat, location] : newChildLocationBySourceFlat) {
+		const int newFlat = flatChildIndex(staged, location.first, location.second);
+		if (newFlat < 0)
+			return false;
+		newFlatBySourceFlat.emplace(sourceFlat, newFlat);
 	}
 
 	auto remapControllerState = [&](json& owner) {
@@ -515,9 +588,10 @@ bool Parser::pasteSelectionClipboard(json& blueprint, const SelectionClipboard& 
 				ensureJointReference(*pastedChild, joint["id"].get<std::int64_t>());
 			}
 			else {
-				joint[childKey] = endpoint.second;
+				const int targetChild = remapOriginalFlatIndex(endpoint.second);
+				joint[childKey] = targetChild;
 				if (endpoint.second >= 0 && endpoint.second < originalChildCount)
-					originalEndpointReferences.emplace_back(endpoint.second, joint["id"].get<std::int64_t>());
+					originalEndpointReferences.emplace_back(targetChild, joint["id"].get<std::int64_t>());
 			}
 		}
 	}

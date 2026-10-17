@@ -102,6 +102,7 @@ struct State {
   bool stackSelection{};
   bool logicManipulation{};
   int logicSource = -1;
+  bool showAllLogicConnections{};
   bool copyBlockState{false};
   bool showLogicGateLabels{false};
   Parser::SelectionClipboard clipboard;

@@ -90,8 +90,9 @@ Logic gates and physical Controllers are different parts and have separate setti
 1. Select **Start Logic Editing**.
 2. Click a connectable interactive part to choose the source. Click another part to add a directed connection from the source to that target.
 3. **Shift-click** a different connectable part to switch the source. Click the source itself to connect it to itself.
-4. Click a connection arrow to remove that connection. Click empty viewport space or **right-click** to clear the source and selection while staying in Logic Editing.
-5. Select **Stop Logic Editing** or press **Esc** to leave the mode.
+4. **Show all connections while editing** is off by default. With a source selected, the viewport then shows only connections to or from that source. Turn it on to keep every connection visible. When no source is selected, all connections stay visible so you can choose a source. The button shows **On** or **Off**, is available during Logic Editing, and resets to **Off** when you exit the mode.
+5. Click a connection arrow to remove that connection. Click empty viewport space or **right-click** to clear the source and selection while staying in Logic Editing.
+6. Select **Stop Logic Editing** or press **Esc** to leave the mode.
 
 Logic Editing changes connections between interactive parts. It does not edit a physical Controller’s bearing rotation settings.
 
@@ -111,6 +112,7 @@ These settings apply to bearings connected to the physical Controller. Engines a
 
 - **Copy** or **Ctrl+C** copies the selected parts. Joints between copied parts are included automatically; selecting a joint also copies it.
 - **Paste** or **Ctrl+V** pastes the copied parts and joints into the same open blueprint. Each paste is offset one additional grid unit along +X, and the pasted objects become the selection.
+- If you copy only some parts from a body, the pasted parts stay in that same body. If you copy every part in a body, Paste makes a separate copy of that body. This preserves the original assembly when adding more pieces to it while keeping a full copied assembly independent.
 - **Copy block state (connections)** is off by default. Turn it on before pasting to copy interactive-part connections and Controller bearing settings. References between copied parts are redirected to the pasted copies; references to unselected parts continue to point to the originals. With the option off, copied connections and Controller settings are reset.
 - **Undo** or **Ctrl+Z** reverses the last editor change. **Redo** or **Ctrl+Y** reapplies an undone change. Undo history belongs to the currently open blueprint and is not written to disk until saved.
 - **Save Blueprint** or **Ctrl+S** writes edits to the selected blueprint’s `blueprint.json`.

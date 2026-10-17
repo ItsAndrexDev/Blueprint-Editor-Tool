@@ -84,6 +84,7 @@ namespace BlueprintViewport {
 			state.stackSelection = false;
 			state.logicManipulation = false;
 			state.logicSource = -1;
+			state.showAllLogicConnections = false;
 			state.dragSelection.clear();
 			state.dragAxis = 0;
 			state.pan = { 0, 0 };
@@ -153,6 +154,7 @@ namespace BlueprintViewport {
 		if (shortcutReady && state.logicManipulation && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
 			state.logicManipulation = false;
 			state.logicSource = -1;
+			state.showAllLogicConnections = false;
 			notify("Logic manipulation disabled");
 		}
 		if (shortcutReady && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
@@ -219,21 +221,43 @@ namespace BlueprintViewport {
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.17f, .53f, .58f, 1.f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.10f, .36f, .41f, 1.f));
 		}
-		if (ImGui::Button(state.logicManipulation ? "Stop Logic Editing" : "Start Logic Editing")) {
+		const bool clickedLogicButton = ImGui::Button(state.logicManipulation ? "Stop Logic Editing" : "Start Logic Editing");
+		if (logicButtonWasActive)
+			ImGui::PopStyleColor(3);
+		if (clickedLogicButton) {
 			state.logicManipulation = !state.logicManipulation;
 			state.logicSource = -1;
+			if (!state.logicManipulation)
+				state.showAllLogicConnections = false;
 			state.dragSelection.clear();
 			state.dragAxis = 0;
 			notify(state.logicManipulation ? "Logic manipulation enabled" : "Logic manipulation disabled");
 		}
+		ImGui::SameLine();
+		const bool showAllConnectionsButtonWasActive = state.showAllLogicConnections;
+		if (showAllConnectionsButtonWasActive) {
+			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.13f, .43f, .48f, 1.f));
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.17f, .53f, .58f, 1.f));
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.10f, .36f, .41f, 1.f));
+		}
+		ImGui::BeginDisabled(!state.logicManipulation);
+		const bool clickedShowAllConnections = ImGui::Button(state.showAllLogicConnections
+			? "Show all connections while editing: On##ShowAllConnections"
+			: "Show all connections while editing: Off##ShowAllConnections");
+		ImGui::EndDisabled();
+		if (showAllConnectionsButtonWasActive)
+			ImGui::PopStyleColor(3);
+		if (clickedShowAllConnections)
+			state.showAllLogicConnections = !state.showAllLogicConnections;
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("When off, selecting a source shows only connections to or from it. "
+				"With no source selected, all connections remain visible so you can choose one.");
 		if (state.logicManipulation)
 			ImGui::SameLine();
 		if (state.logicManipulation)
 			ImGui::TextWrapped("Click a source, then targets. Click the source again to wire it into "
 				"itself. Shift-click to switch sources; click empty space or right-click to "
 				"clear selection. Click an arrow to remove a link. Esc exits.");
-		if (logicButtonWasActive)
-			ImGui::PopStyleColor(3);
 		float avail = ImGui::GetContentRegionAvail().x;
 		float inspector = std::clamp(avail * .25f, 230.f, 330.f);
 		ImGui::BeginChild("BlueprintViewport", ImVec2(std::max(120.f, avail - inspector - 8), 0), true,
@@ -670,6 +694,9 @@ namespace BlueprintViewport {
 					if (targetPart == partByControllerId.end())
 						continue;
 					const int target = targetPart->second;
+					if (!state.showAllLogicConnections && state.logicSource >= 0 &&
+						source != state.logicSource && target != state.logicSource)
+						continue;
 					if (target == source) {
 						const ImVec2 center = partScreen[source];
 						const ImVec2 start(center.x + 8.f, center.y - 5.f);
