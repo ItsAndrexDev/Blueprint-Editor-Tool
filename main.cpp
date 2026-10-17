@@ -2,11 +2,11 @@
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <Windows.h>
 #undef RGB
-#include "gui_manager.hpp"
-#include "help_page.hpp"
+#include "helpers/ui/gui_manager.hpp"
+#include "helpers/ui/help_page.hpp"
 #include "helpers/blueprint/blueprint_viewport.hpp"
 #include "helpers/scrap/scrap_parser.hpp"
-#include "menu_helper.hpp"
+#include "helpers/ui/menu_helper.hpp"
 #include "resource.h"
 #include <GLFW/glfw3native.h>
 #include <cstdio>

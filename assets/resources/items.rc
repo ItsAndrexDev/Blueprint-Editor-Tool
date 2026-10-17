@@ -1,0 +1,4 @@
+#include "resource.h"
+
+IDR_ITEMS_JSON RCDATA "../resources/items.json"
+IDI_ICON1 ICON "../assets/resources/icon.ico"

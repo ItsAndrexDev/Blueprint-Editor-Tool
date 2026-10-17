@@ -146,7 +146,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="gui_manager.cpp" />
+    <ClCompile Include="helpers\ui\gui_manager.cpp" />
     <ClCompile Include="helpers\blueprint\blueprint_viewport.cpp" />
     <ClCompile Include="helpers\blueprint\blueprint_viewport_actions.cpp" />
     <ClCompile Include="helpers\blueprint\blueprint_viewport_canvas.cpp" />
@@ -172,7 +172,7 @@
     <ClCompile Include="includes\imgui\imgui_tables.cpp" />
     <ClCompile Include="includes\imgui\imgui_widgets.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="menu_helper.cpp" />
+    <ClCompile Include="helpers\ui\menu_helper.cpp" />
     <ClCompile Include="helpers\scrap\scrap_parser.cpp" />
     <ClCompile Include="helpers\scrap\scrap_clipboard.cpp" />
     <ClCompile Include="helpers\scrap\scrap_clipboard_paste.cpp" />
@@ -186,7 +186,7 @@
     <ResourceCompile Include="items.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gui_manager.hpp" />
+    <ClInclude Include="helpers\ui\gui_manager.hpp" />
     <ClInclude Include="includes\imgui\imconfig.h" />
     <ClInclude Include="includes\imgui\imgui.h" />
     <ClInclude Include="includes\imgui\imgui_impl_glfw.h" />
@@ -205,8 +205,8 @@
     <ClInclude Include="helpers\blueprint\blueprint_viewport_fbx_binary.hpp" />
     <ClInclude Include="helpers\blueprint\fbx_inflate.hpp" />
     <ClInclude Include="includes\stb_image.h" />
-    <ClInclude Include="menu_helper.hpp" />
-    <ClInclude Include="help_page.hpp" />
+    <ClInclude Include="helpers\ui\menu_helper.hpp" />
+    <ClInclude Include="helpers\ui\help_page.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "helpers/blueprint/blueprint_viewport.hpp"
+#include "../blueprint/blueprint_viewport.hpp"
 #include "imgui/imgui.h"
 #include <glad/glad.h>
 
