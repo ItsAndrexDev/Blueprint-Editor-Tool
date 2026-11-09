@@ -14,7 +14,9 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
 
     ImGui::SeparatorText("1. Open and save a blueprint");
     ImGui::BulletText(
-        "The Blueprint Loader scans the Scrap Mechanic user folder when the editor starts. Search "
+        "On first launch, choose the Scrap Mechanic installation folder containing Data and "
+        "Survival. The editor remembers this folder for models and shape data. The Blueprint "
+        "Loader scans the Scrap Mechanic user folder when the editor starts. Search "
         "blueprints... filters by name (case-sensitive). Refresh scans the folder again.");
     ImGui::BulletText(
         "Select a blueprint thumbnail to open it. Back to Selection returns to the list. Save "

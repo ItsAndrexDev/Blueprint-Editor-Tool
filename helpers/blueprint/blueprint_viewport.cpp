@@ -38,6 +38,19 @@ void resetSelection() {
     state.historyActionInProgress = false;
 }
 
+void setGameDirectory(const std::filesystem::path& directory) {
+    state.game = directory;
+    state.catalog.clear();
+    state.blockShapes.clear();
+    state.footprintAnchoredParts.clear();
+    state.shapeSizes.clear();
+    state.shapeDefaultColors.clear();
+    state.shapeDiffuseTextures.clear();
+    state.catalogLoaded = false;
+    state.catalogAvailable = false;
+    state.error.clear();
+}
+
 void notify(const std::string& message) {
     state.notification = message;
     state.notificationUntil = ImGui::GetTime() + 2.4;

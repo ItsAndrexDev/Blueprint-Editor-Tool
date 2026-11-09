@@ -9,7 +9,6 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
-#include <regex>
 #include <string>
 #include <string_view>
 
@@ -31,45 +30,6 @@ bool readFile(const std::filesystem::path& p, json& out) {
         return false;
     }
 }
-std::filesystem::path steamRoot() {
-    wchar_t steam[1024]{};
-    DWORD n = (DWORD)std::size(steam);
-    HKEY key{};
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", 0, KEY_READ, &key) ==
-        ERROR_SUCCESS) {
-        n = (DWORD)std::size(steam);
-        RegQueryValueExW(key, L"SteamPath", nullptr, nullptr, (LPBYTE)steam, &n);
-        RegCloseKey(key);
-        if (n) {
-            auto p = std::filesystem::path(steam);
-            if (std::filesystem::exists(p / L"steamapps"))
-                return p;
-        }
-    }
-    if (RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Valve\\Steam", 0, KEY_READ, &key) ==
-        ERROR_SUCCESS) {
-        n = (DWORD)std::size(steam);
-        if (RegQueryValueExW(key, L"InstallPath", nullptr, nullptr, (LPBYTE)steam, &n) ==
-            ERROR_SUCCESS) {
-            RegCloseKey(key);
-            auto p = std::filesystem::path(steam);
-            if (std::filesystem::exists(p / L"steamapps"))
-                return p;
-        } else
-            RegCloseKey(key);
-    }
-    wchar_t* pf = nullptr;
-    size_t pfLength = 0;
-    if (_wdupenv_s(&pf, &pfLength, L"PROGRAMFILES(X86)") == 0 && pf) {
-        auto p = std::filesystem::path(pf) / L"Steam";
-        free(pf);
-        if (std::filesystem::exists(p / L"steamapps"))
-            return p;
-    }
-    return {};
-}
-
 std::filesystem::path resolveGameAsset(const std::string& asset) {
     constexpr std::string_view gameToken = "$GAME_DATA/";
     constexpr std::string_view survivalToken = "$SURVIVAL_DATA/";
@@ -84,28 +44,13 @@ void loadCatalog() {
     if (state.catalogLoaded)
         return;
     state.catalogLoaded = true;
-    auto steam = steamRoot();
-    if (steam.empty()) {
-        state.error = "Steam installation not found.";
+    if (state.game.empty()) {
+        state.error = "Select your Scrap Mechanic game folder to load its parts and models.";
         return;
     }
-    auto libraries = steam / L"steamapps" / L"libraryfolders.vdf";
-    std::vector<std::filesystem::path> roots{steam};
-    std::ifstream lib(libraries);
-    std::string line;
-    const std::regex pathPattern(R"rx("path"\s+"([^"]+)")rx");
-    while (std::getline(lib, line)) {
-        std::smatch m;
-        if (std::regex_search(line, m, pathPattern)) {
-            std::string v = m[1].str();
-            std::replace(v.begin(), v.end(), '\\', '/');
-            auto p = std::filesystem::path(v);
-            if (std::find(roots.begin(), roots.end(), p) == roots.end())
-                roots.push_back(p);
-        }
-    }
+    const std::vector<std::filesystem::path> roots{state.game};
     for (const auto& root : roots) {
-        auto game = root / L"steamapps" / L"common" / L"Scrap Mechanic";
+        const auto& game = root;
         const std::array<std::filesystem::path, 2> databases = {
             game / L"Data" / L"Objects" / L"Database" / L"ShapeSets",
             game / L"Survival" / L"Objects" / L"Database" / L"ShapeSets"};
@@ -366,7 +311,7 @@ void loadCatalog() {
         }
     }
     if (!state.catalogAvailable)
-        state.error = "Scrap Mechanic shape database was not found in the Steam library.";
+        state.error = "Scrap Mechanic game data was not found in the selected folder.";
 }
 
 } // namespace BlueprintViewport::Internal

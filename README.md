@@ -26,13 +26,13 @@ https://discord.gg/8p3JU8Vn8D
 
 <img width="1919" height="1028" alt="image" src="https://github.com/user-attachments/assets/5bff6cd4-9291-43d3-9229-1c7cfaccc32d" />
 
-1. Start the editor. The **Blueprint Loader** scans the Scrap Mechanic user folder for saved blueprints.
+1. On first launch, choose the Scrap Mechanic installation folder containing the `Data` and `Survival` folders. The editor remembers this location for later launches. The **Blueprint Loader** separately scans the Scrap Mechanic user folder for saved blueprints.
 2. Type all or part of a blueprint name in **Search blueprints...** to filter the list. Search matches are case-sensitive.
 3. Select a blueprint’s thumbnail to open it. The count beside **Refresh** shows how many blueprints are loaded.
 4. Select **Refresh** after adding or removing blueprints to scan the folder again.
 5. In the editor, select **Back to Selection** to return to the loader.
 
-The editor reads blueprints from `%APPDATA%\Axolot Games\Scrap Mechanic\User\<User_...>\Blueprints`. It writes changes to the selected blueprint’s existing `blueprint.json` file when you save. Back up important blueprints before editing.
+Game models and shape data are loaded from the selected installation folder. The editor reads blueprints from `%APPDATA%\Axolot Games\Scrap Mechanic\User\<User_...>\Blueprints`, which remains the fixed save location regardless of where the game is installed. It writes changes to the selected blueprint’s existing `blueprint.json` file when you save. Back up important blueprints before editing.
 
 ## Selection and part search
 

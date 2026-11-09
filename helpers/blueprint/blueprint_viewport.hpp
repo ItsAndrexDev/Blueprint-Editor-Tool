@@ -64,6 +64,7 @@ struct ModelLoadReport {
 ModelLoadReport inspectModelFile(const std::filesystem::path& path);
 ModelLoadReport inspectShape(const std::string& shapeId);
 void resetSelection();
+void setGameDirectory(const std::filesystem::path& directory);
 void notify(const std::string& message);
 void shutdownRenderer();
 void render(json& blueprint,
