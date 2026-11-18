@@ -72,8 +72,9 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
                       "viewport. Select it again to hide labels.");
     ImGui::BulletText(
         "Start Logic Editing to edit directed connections between interactive parts. Click a "
-        "connectable part to choose a source, then click a target to connect it. Shift-click "
-        "another part to switch the source; click the source itself to connect it to itself.");
+        "connectable part to choose a source, then click a target to connect it. Pistons can be "
+        "targets, but cannot be sources. Shift-click another part to switch the source; click the "
+        "source itself to connect it to itself.");
     ImGui::BulletText(
         "Show all connections while editing is off by default. With a source selected, it shows "
         "only arrows to or from that source. Turn it on to show every connection. With no source "
@@ -85,9 +86,10 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
     ImGui::Spacing();
 
     ImGui::SeparatorText("5. Physical Controller bearing rotations");
-    ImGui::BulletText("Select the physical Controller part and open Controller settings > Edit "
-                      "bearing rotations... in the Inspector. This edits connected bearing "
-                      "rotations; it does not edit engines or logic-gate operations.");
+    ImGui::BulletText("Select the physical Controller part to edit its seconds-per-frame speed. "
+                      "Lower positive values run faster. Open Controller settings > Edit bearing "
+                      "rotations... to edit connected bearing rotations; this does not edit "
+                      "engines or logic-gate operations.");
     ImGui::BulletText("Frame 0 is the bearing's starting angle. Frames 1-10 are the rotation "
                       "steps, in degrees. Reverse direction flips that bearing's sequence. Only "
                       "connected bearings with saved settings are listed.");

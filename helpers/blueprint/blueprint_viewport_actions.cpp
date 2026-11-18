@@ -25,7 +25,19 @@ void EditingActions::selectPart(int index, bool additive) {
     if (index < 0 || index >= (int)blocks_.size())
         return;
     if (state.logicManipulation) {
-        if (controllerIdForPart(index) < 0) {
+        if (isPistonPart(index)) {
+            if (state.logicSource < 0) {
+                BlueprintViewport::notify("Select an interactive source before a piston target");
+                return;
+            }
+            const std::string itemName = partDisplayName(index);
+            if (Parser::addDirectedConnection(blueprint_, blocks_, state.logicSource, index))
+                BlueprintViewport::notify("Connected source to " + itemName);
+            else
+                BlueprintViewport::notify("These parts are already connected");
+            return;
+        }
+        if (!canUseAsLogicSource(index)) {
             BlueprintViewport::notify("That part cannot be used as a logic source");
             return;
         }

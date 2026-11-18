@@ -191,6 +191,10 @@ class EditingActions {
     std::vector<ControllerBearingSettings> controllerBearingSettings(int index);
     bool setControllerBearingAngle(int index, std::int64_t jointId, int frameIndex, int angle);
     bool setControllerBearingReverse(int index, std::int64_t jointId, bool reverse);
+    float controllerTimePerFrame(int index);
+    bool setControllerTimePerFrame(int index, float seconds);
+    bool isPistonPart(int index) const;
+    bool canUseAsLogicSource(int index);
     void selectPart(int index, bool additive);
     void selectAllOfType(const std::string& shapeId, bool additive);
     void addSelectionGroup(int index);
@@ -232,6 +236,8 @@ struct InspectorContext {
         controllerBearingSettings;
     std::function<bool(int, std::int64_t, int, int)> setControllerBearingAngle;
     std::function<bool(int, std::int64_t, bool)> setControllerBearingReverse;
+    std::function<float(int)> controllerTimePerFrame;
+    std::function<bool(int, float)> setControllerTimePerFrame;
     std::function<void(int, bool)> selectPart;
     std::function<void(const std::string&, bool)> selectAllOfType;
 };

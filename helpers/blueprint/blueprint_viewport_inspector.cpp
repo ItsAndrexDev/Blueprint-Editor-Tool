@@ -197,7 +197,21 @@ void renderInspector(const InspectorContext& context) {
             static int controllerSettingsPart = -1;
             ImGui::Spacing();
             ImGui::SeparatorText("Controller settings");
-            ImGui::TextDisabled("Edit the bearing rotation steps for this controller.");
+            ImGui::TextDisabled("Edit the frame speed and bearing rotation steps.");
+            ImGui::Text("Time per frame (seconds)");
+            float timePerFrame = context.controllerTimePerFrame
+                                     ? context.controllerTimePerFrame(state.selection)
+                                     : 1.f;
+            ImGui::SetNextItemWidth(-1.f);
+            if (ImGui::InputFloat("##ControllerTimePerFrame",
+                                  &timePerFrame,
+                                  0.1f,
+                                  0.5f,
+                                  "%.3f") &&
+                context.setControllerTimePerFrame)
+                context.setControllerTimePerFrame(state.selection, timePerFrame);
+            ImGui::TextDisabled(
+                "Lower positive values make the Controller sequence run faster.");
             if (ImGui::Button("Edit bearing rotations...", ImVec2(-1.f, 0.f))) {
                 controllerSettingsPart = state.selection;
                 ImGui::OpenPopup("ControllerRotationEditor");

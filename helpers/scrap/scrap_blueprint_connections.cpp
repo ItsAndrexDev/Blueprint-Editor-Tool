@@ -4,6 +4,10 @@
 
 #include <algorithm>
 
+namespace {
+constexpr const char* pistonShapeId = "260b4597-f1ac-409c-8e6b-90c998c5fe94";
+}
+
 bool Parser::addDirectedConnection(json& blueprint,
                                    const std::vector<Block>& blocks,
                                    int sourceIndex,
@@ -11,9 +15,23 @@ bool Parser::addDirectedConnection(json& blueprint,
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= (int)blocks.size() ||
         targetIndex >= (int)blocks.size())
         return false;
+    if (blocks[sourceIndex].shapeID == pistonShapeId)
+        return false;
     auto controllerFor = [&](const Block& block) -> json* {
-        if (block.isJoint || block.bodyIndex < 0 || block.childIndex < 0 ||
-            !blueprint.is_object() || !blueprint.contains("bodies") ||
+        if (!blueprint.is_object())
+            return nullptr;
+        if (block.isJoint) {
+            if (block.shapeID != pistonShapeId || block.jointIndex < 0 ||
+                !blueprint.contains("joints") || !blueprint["joints"].is_array() ||
+                block.jointIndex >= (int)blueprint["joints"].size())
+                return nullptr;
+            auto& joint = blueprint["joints"][block.jointIndex];
+            return joint.is_object() && joint.contains("controller") &&
+                           joint["controller"].is_object()
+                       ? &joint["controller"]
+                       : nullptr;
+        }
+        if (block.bodyIndex < 0 || block.childIndex < 0 || !blueprint.contains("bodies") ||
             !blueprint["bodies"].is_array() || block.bodyIndex >= (int)blueprint["bodies"].size())
             return nullptr;
         auto& body = blueprint["bodies"][block.bodyIndex];

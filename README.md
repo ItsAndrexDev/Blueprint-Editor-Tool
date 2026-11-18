@@ -94,13 +94,13 @@ Logic gates and physical Controllers are different parts and have separate setti
 5. Click a connection arrow to remove that connection. Click empty viewport space or **right-click** to clear the source and selection while staying in Logic Editing.
 6. Select **Stop Logic Editing** or press **Esc** to leave the mode.
 
-Logic Editing changes connections between interactive parts. It does not edit a physical Controller’s bearing rotation settings.
+Logic Editing changes directed connections between interactive parts. Pistons can receive a connection from any interactive source, but cannot be selected as a source themselves. It does not edit a physical Controller’s bearing rotation settings.
 
 ## Controller bearing rotations
 
 <img width="1919" height="1032" alt="image" src="https://github.com/user-attachments/assets/bf1b2662-d52a-4c93-b5e9-a9763cfae5af" />
 
-Select a physical **Controller** part, then use **Controller settings → Edit bearing rotations...** in the Inspector. The editor lists connected bearings with saved settings.
+Select a physical **Controller** part to edit its **Seconds per frame** value in the Inspector. Lower positive values make its sequence run faster. Use **Controller settings → Edit bearing rotations...** to edit connected bearing frames.
 
 - **Frame 0 · Start** is the bearing’s starting angle.
 - **Frames 1–10** define the rotation sequence in degrees. Edit the displayed frame values directly.

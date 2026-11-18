@@ -12,6 +12,7 @@ namespace BlueprintViewport::Internal {
 namespace {
 constexpr const char* logicGateShapeId = "9f0f56e8-2c31-4d83-996c-d00a9b296c3f";
 constexpr const char* controllerShapeId = "12862001-666c-4bdd-8326-a1f43610d28b";
+constexpr const char* pistonShapeId = "260b4597-f1ac-409c-8e6b-90c998c5fe94";
 
 bool isPhysicalController(const Parser::Block& part, const std::string& displayName) {
     return !part.isJoint &&
@@ -20,9 +21,21 @@ bool isPhysicalController(const Parser::Block& part, const std::string& displayN
 } // namespace
 
 json* EditingActions::controllerForPart(int index) {
-    if (index < 0 || index >= (int)blocks_.size() || blocks_[index].isJoint)
+    if (index < 0 || index >= (int)blocks_.size())
         return nullptr;
     const auto& part = blocks_[index];
+    if (part.isJoint) {
+        if (lower(part.shapeID) != pistonShapeId || part.jointIndex < 0 ||
+            !blueprint_.is_object() || !blueprint_.contains("joints") ||
+            !blueprint_["joints"].is_array() ||
+            part.jointIndex >= (int)blueprint_["joints"].size())
+            return nullptr;
+        auto& joint = blueprint_["joints"][part.jointIndex];
+        return joint.is_object() && joint.contains("controller") &&
+                       joint["controller"].is_object()
+                   ? &joint["controller"]
+                   : nullptr;
+    }
     if (part.bodyIndex < 0 || part.childIndex < 0 || !blueprint_.is_object() ||
         !blueprint_.contains("bodies") || !blueprint_["bodies"].is_array() ||
         part.bodyIndex >= (int)blueprint_["bodies"].size())
@@ -46,6 +59,46 @@ std::int64_t EditingActions::controllerIdForPart(int index) {
     } catch (...) {
         return -1;
     }
+}
+
+bool EditingActions::isPistonPart(int index) const {
+    if (index < 0 || index >= (int)blocks_.size())
+        return false;
+    return lower(blocks_[index].shapeID) == pistonShapeId ||
+           lower(partDisplayName(index)) == "piston";
+}
+
+bool EditingActions::canUseAsLogicSource(int index) {
+    return !isPistonPart(index) && controllerIdForPart(index) >= 0;
+}
+
+float EditingActions::controllerTimePerFrame(int index) {
+    if (index < 0 || index >= (int)blocks_.size() ||
+        !isPhysicalController(blocks_[index], partDisplayName(index)))
+        return 1.f;
+    json* controller = controllerForPart(index);
+    if (!controller || !controller->contains("timePerFrame") ||
+        !(*controller)["timePerFrame"].is_number())
+        return 1.f;
+    try {
+        const double value = (*controller)["timePerFrame"].get<double>();
+        return std::isfinite(value) && value > 0.0 && value <= std::numeric_limits<float>::max()
+                   ? static_cast<float>(value)
+                   : 1.f;
+    } catch (...) {
+        return 1.f;
+    }
+}
+
+bool EditingActions::setControllerTimePerFrame(int index, float seconds) {
+    if (index < 0 || index >= (int)blocks_.size() || !std::isfinite(seconds) || seconds <= 0.f ||
+        !isPhysicalController(blocks_[index], partDisplayName(index)))
+        return false;
+    json* controller = controllerForPart(index);
+    if (!controller)
+        return false;
+    (*controller)["timePerFrame"] = seconds;
+    return true;
 }
 
 std::string EditingActions::partDisplayName(int index) const {

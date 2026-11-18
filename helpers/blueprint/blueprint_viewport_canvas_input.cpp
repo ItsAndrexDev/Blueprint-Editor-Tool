@@ -76,6 +76,8 @@ void ViewportCanvas::handleInput() {
                 notify("Selection cleared");
             } else if (actions.controllerIdForPart(picked) < 0)
                 notify("That part cannot be connected");
+            else if (!actions.canUseAsLogicSource(picked) && state.logicSource < 0)
+                notify("Pistons can be connection targets, not sources");
             else if (state.logicSource < 0) {
                 state.logicSource = picked;
                 state.selection = picked;
@@ -83,11 +85,14 @@ void ViewportCanvas::handleInput() {
                 state.selectionSet.insert(picked);
                 notify("Logic source selected");
             } else if (ImGui::GetIO().KeyShift) {
-                state.logicSource = picked;
-                state.selection = picked;
-                state.selectionSet.clear();
-                state.selectionSet.insert(picked);
-                notify("Logic source changed");
+                if (actions.canUseAsLogicSource(picked)) {
+                    state.logicSource = picked;
+                    state.selection = picked;
+                    state.selectionSet.clear();
+                    state.selectionSet.insert(picked);
+                    notify("Logic source changed");
+                } else
+                    notify("Pistons can be connection targets, not sources");
             } else if (picked == state.logicSource) {
                 const std::string itemName = actions.partDisplayName(picked);
                 if (Parser::addDirectedConnection(blueprint, blocks, picked, picked))

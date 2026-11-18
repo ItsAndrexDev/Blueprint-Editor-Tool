@@ -100,7 +100,7 @@ void render(json& blueprint,
         state.selectionSet.insert(state.selection);
     EditingActions actions(blueprint, blueprintPath, blocks, items);
     if (state.logicSource < 0 || state.logicSource >= (int)blocks.size() ||
-        actions.controllerIdForPart(state.logicSource) < 0)
+        !actions.canUseAsLogicSource(state.logicSource))
         state.logicSource = -1;
     auto isSelected = [&actions](int index) {
         return actions.isSelected(index);
@@ -153,6 +153,12 @@ void render(json& blueprint,
         };
     auto setControllerBearingReverse = [&actions](int index, std::int64_t jointId, bool reverse) {
         return actions.setControllerBearingReverse(index, jointId, reverse);
+    };
+    auto controllerTimePerFrame = [&actions](int index) {
+        return actions.controllerTimePerFrame(index);
+    };
+    auto setControllerTimePerFrame = [&actions](int index, float seconds) {
+        return actions.setControllerTimePerFrame(index, seconds);
     };
     ImGui::Begin("Blueprint Editor");
     const ImGuiIO& io = ImGui::GetIO();
@@ -301,6 +307,8 @@ void render(json& blueprint,
                                      controllerBearingSettings,
                                      setControllerBearingAngle,
                                      setControllerBearingReverse,
+                                     controllerTimePerFrame,
+                                     setControllerTimePerFrame,
                                      selectPart,
                                      selectAllOfType});
     json frameSnapshot = blueprint;
