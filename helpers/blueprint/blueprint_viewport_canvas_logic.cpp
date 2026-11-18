@@ -13,8 +13,11 @@ namespace BlueprintViewport::Internal {
 void ViewportCanvas::buildLogicEdges() {
     if (state.logicManipulation) {
         std::unordered_map<std::int64_t, int> partByControllerId;
+        std::unordered_map<std::int64_t, int> partByJointId;
         std::unordered_map<std::int64_t, std::unordered_set<std::int64_t>> targetsByControllerId;
         for (int index = 0; index < (int)blocks.size(); ++index) {
+            if (blocks[index].isJoint && blocks[index].jointId >= 0)
+                partByJointId.emplace(blocks[index].jointId, index);
             const auto id = actions.controllerIdForPart(index);
             if (id < 0)
                 continue;
@@ -90,6 +93,41 @@ void ViewportCanvas::buildLogicEdges() {
                        partScreen[target].y - uy * 15.f + oy}}});
             }
         }
+        for (int source = 0; source < (int)blocks.size(); ++source) {
+            json* controller = actions.controllerForPart(source);
+            if (!controller || !controller->contains("joints") ||
+                !(*controller)["joints"].is_array())
+                continue;
+            for (const auto& connection : (*controller)["joints"])
+                if (connection.is_object() && connection.contains("id") &&
+                    connection["id"].is_number_integer())
+                    try {
+                        const auto targetId = connection["id"].get<std::int64_t>();
+                        const auto targetPart = partByJointId.find(targetId);
+                        if (targetPart == partByJointId.end())
+                            continue;
+                        const int target = targetPart->second;
+                        if (!state.showAllLogicConnections && state.logicSource >= 0 &&
+                            source != state.logicSource && target != state.logicSource)
+                            continue;
+                        const float dx = partScreen[target].x - partScreen[source].x;
+                        const float dy = partScreen[target].y - partScreen[source].y;
+                        const float length = std::sqrt(dx * dx + dy * dy);
+                        if (length < 10.f)
+                            continue;
+                        const float ux = dx / length, uy = dy / length;
+                        logicEdges.push_back(
+                            {source,
+                             target,
+                             targetId,
+                             {{partScreen[source].x + ux * 8.f,
+                               partScreen[source].y + uy * 8.f},
+                              {partScreen[target].x - ux * 8.f,
+                               partScreen[target].y - uy * 8.f}},
+                             true});
+                    } catch (...) {
+                    }
+        }
     }
 }
 
@@ -100,6 +138,27 @@ void ViewportCanvas::drawLogicConnections() {
             if (edge.path.size() < 2)
                 continue;
             const ImVec2 from = edge.path.front(), to = edge.path.back();
+            if (edge.mechanical) {
+                const float dx = to.x - from.x, dy = to.y - from.y;
+                const float length = std::sqrt(dx * dx + dy * dy);
+                if (length < 1.f)
+                    continue;
+                const float ux = dx / length, uy = dy / length;
+                const ImU32 color = edge.source == state.logicSource ? IM_COL32(255, 190, 76, 255)
+                                                                     : IM_COL32(192, 143, 255, 245);
+                for (float at = 0.f; at < length; at += 12.f) {
+                    const float end = std::min(at + 6.f, length);
+                    const ImVec2 dashStart(from.x + ux * at, from.y + uy * at);
+                    const ImVec2 dashEnd(from.x + ux * end, from.y + uy * end);
+                    dl->AddLine(dashStart, dashEnd, IM_COL32(10, 16, 22, 235), 7.f);
+                    dl->AddLine(dashStart, dashEnd, color, 3.f);
+                }
+                dl->AddCircleFilled(from, 5.f, IM_COL32(10, 16, 22, 245));
+                dl->AddCircleFilled(from, 2.8f, color);
+                dl->AddCircleFilled(to, 5.f, IM_COL32(10, 16, 22, 245));
+                dl->AddCircleFilled(to, 2.8f, color);
+                continue;
+            }
             const size_t tangentOffset = std::min<size_t>(4, edge.path.size() - 1);
             const ImVec2 previous = edge.path[edge.path.size() - 1 - tangentOffset];
             const float dx = to.x - previous.x, dy = to.y - previous.y,
@@ -147,11 +206,11 @@ void ViewportCanvas::drawLogicConnections() {
         dl->PopClipRect();
         std::string guidance =
             state.logicSource >= 0
-                ? "LOGIC SOURCE: part " + std::to_string(state.logicSource + 1) +
-                      "  ·  click targets  ·  Shift-click changes source  ·  right-click "
+                ? "SOURCE: part " + std::to_string(state.logicSource + 1) +
+                      "  ·  click a compatible target  ·  Shift-click changes source  ·  right-click "
                       "clears selection  ·  arrows remove  ·  Esc exits"
-                : "LOGIC MODE  ·  click source, then targets  ·  click source to "
-                  "wire into itself  ·  right-click clears selection  ·  arrows remove  ·  Esc "
+                : "CONNECTION MODE  ·  click a source, then a compatible target  ·  "
+                  "right-click clears selection  ·  arrows remove  ·  Esc "
                   "exits";
         const float hintWrapWidth = std::max(80.f, size.x - 36.f);
         const ImVec2 labelSize =

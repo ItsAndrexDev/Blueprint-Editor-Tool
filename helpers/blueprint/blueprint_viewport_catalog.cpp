@@ -86,6 +86,32 @@ void loadCatalog() {
                     if (!part.is_object() || !part.contains("uuid") || !part["uuid"].is_string())
                         continue;
                     const auto id = lower(part["uuid"].get<std::string>());
+                    std::uint32_t connectionCapabilities = 0;
+                    for (const auto* key : {"button", "lever", "sensor", "logic", "timer", "seat",
+                                            "steering"})
+                        if (part.contains(key))
+                            connectionCapabilities |= ShapeLogicOutput;
+                    if (part.contains("seat") || part.contains("steering"))
+                        connectionCapabilities |= ShapeSeatOutput;
+                    if (part.contains("button") || part.contains("lever"))
+                        connectionCapabilities |= ShapeButtonSwitchTarget;
+                    if (part.contains("gasEngine") || part.contains("electricEngine"))
+                        connectionCapabilities |= ShapeEngineJointOutput | ShapeEngineTarget;
+                    if (part.contains("gasEngine"))
+                        connectionCapabilities |= ShapeGasEngineBearingLimit;
+                    if (part.contains("thruster"))
+                        connectionCapabilities |= ShapeThrusterTarget;
+                    if (part.contains("controller"))
+                        connectionCapabilities |= ShapeControllerJointOutput | ShapeControllerTarget;
+                    if (part.contains("steering"))
+                        connectionCapabilities |= ShapeSteeringJointOutput;
+                    if (part.contains("bearing"))
+                        connectionCapabilities |= ShapeBearingJoint;
+                    if (part.contains("spring"))
+                        connectionCapabilities |= ShapeSuspensionJoint;
+                    if (part.contains("piston"))
+                        connectionCapabilities |= ShapePistonJoint;
+                    state.shapeConnectionCapabilities[id] = connectionCapabilities;
                     // Keep ShapeSet defaults available for parts whose blueprint has
                     // no valid paint color. Explicit blueprint colors, including black,
                     // still take precedence in displayColor().

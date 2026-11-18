@@ -14,8 +14,8 @@ https://discord.gg/8p3JU8Vn8D
 - [Open a blueprint](#open-a-blueprint)
 - [Selection and part search](#selection-and-part-search)
 - [Move, rotate, resize, and recolor parts](#move-rotate-resize-and-recolor-parts)
-- [Logic gates and logic connections](#logic-gates-and-logic-connections)
-- [Controller bearing rotations](#controller-bearing-rotations)
+- [Logic gates and connections](#logic-gates-and-connections)
+- [Controller joint sequences](#controller-joint-sequences)
 - [Copy, paste, undo, and save](#copy-paste-undo-and-save)
 - [Camera and keyboard shortcuts](#camera-and-keyboard-shortcuts)
 - [Models and compatibility](#models-and-compatibility)
@@ -74,7 +74,7 @@ Scrap Mechanic uses a **Z-up** coordinate system: X and Y are on the ground plan
 - Select the color swatch to open the picker, or type a six-digit hexadecimal value such as `3E9FFE` in the color field.
 - Color changes apply to all selected parts. The Inspector accepts the six hexadecimal digits without the `#` prefix.
 
-## Logic gates and logic connections
+## Logic gates and connections
 
 Logic gates and physical Controllers are different parts and have separate settings.
 
@@ -83,30 +83,31 @@ Logic gates and physical Controllers are different parts and have separate setti
 - Select one or more Logic Gates and choose **Gate operation** in **Logic gate settings**. The operation is applied to every selected Logic Gate: **AND**, **OR**, **XOR**, **NAND**, **NOR**, or **XNOR**.
 - Select **Gate Labels: On** to show each gate’s current operation in the viewport. Select it again to hide the labels.
 
-### Logic connections
+### Connection Editing
 
 <img width="1919" height="1028" alt="image" src="https://github.com/user-attachments/assets/3add167e-681d-46ff-9ca1-4af1377e7800" />
 
-1. Select **Start Logic Editing**.
-2. Click a connectable interactive part to choose the source. Click another part to add a directed connection from the source to that target.
-3. **Shift-click** a different connectable part to switch the source. Click the source itself to connect it to itself.
-4. **Show all connections while editing** is off by default. With a source selected, the viewport then shows only connections to or from that source. Turn it on to keep every connection visible. When no source is selected, all connections stay visible so you can choose a source. The button shows **On** or **Off**, is available during Logic Editing, and resets to **Off** when you exit the mode.
-5. Click a connection arrow to remove that connection. Click empty viewport space or **right-click** to clear the source and selection while staying in Logic Editing.
-6. Select **Stop Logic Editing** or press **Esc** to leave the mode.
+1. Select **Start Connection Editing**.
+2. Click a signal source to choose it. Click a compatible target to create the link. The editor reads connection capabilities from the installed game ShapeSets, including installed part variants.
+3. Buttons, switches, sensors, Logic Gates, and Timers send signals to supported interactive parts. A Seat can connect to buttons and switches; a Driver’s Seat can also connect to engines, thrusters, Controllers, and bearings. Signal sources can target Pistons, but Pistons cannot be sources.
+4. Mechanical links use separate blueprint data: engines connect to bearings, Driver’s Seats connect to bearings and suspensions, and physical Controllers connect to bearings and Pistons for sequenced movement. These links appear as dashed lines.
+   Gas Engines can drive up to five bearings, matching the game handbook’s stated limit.
+5. **Shift-click** a different source to switch it. Click a connection line or arrow to remove that link. **Show all connections while editing** is off by default; with a source selected it shows links to or from that source. Turn it on to show every link. The button resets to **Off** when you exit the mode.
+6. Click empty viewport space or **right-click** to clear the source and selection. Select **Stop Connection Editing** or press **Esc** to leave the mode.
 
-Logic Editing changes directed connections between interactive parts. Pistons can receive a connection from any interactive source, but cannot be selected as a source themselves. It does not edit a physical Controller’s bearing rotation settings.
+Connection Editing handles directed signal links and mechanical joint links separately, preserving their `controller.controllers` and `controller.joints` records.
 
-## Controller bearing rotations
+## Controller joint sequences
 
 <img width="1919" height="1032" alt="image" src="https://github.com/user-attachments/assets/bf1b2662-d52a-4c93-b5e9-a9763cfae5af" />
 
-Select a physical **Controller** part to edit its **Seconds per frame** value in the Inspector. Lower positive values make its sequence run faster. Use **Controller settings → Edit bearing rotations...** to edit connected bearing frames.
+Select a physical **Controller** part to edit its **Seconds per frame** value in the Inspector. Lower positive values make its sequence run faster. Use **Controller settings → Edit Controller joints...** to edit bearing rotations and Piston extension lengths.
 
-- **Frame 0 · Start** is the bearing’s starting angle.
-- **Frames 1–10** define the rotation sequence in degrees. Edit the displayed frame values directly.
-- **Reverse direction** reverses that bearing’s sequence.
+- **Frame 0 · Start** is the joint’s starting position.
+- **Frames 1–10** set bearing rotation in degrees or Piston extension from 0 to 16.
+- **Reverse direction** reverses that joint’s sequence.
 
-These settings apply to bearings connected to the physical Controller. Engines are not Controllers and do not use this editor. If no bearings appear, connect a bearing to the Controller in Scrap Mechanic and reopen the blueprint.
+These settings apply to bearings and Pistons connected to the physical Controller. Engines are not Controllers and do not use this sequence editor.
 
 ## Copy, paste, undo, and save
 
@@ -129,7 +130,7 @@ These settings apply to bearings connected to the physical Controller. Engines a
 | Zoom the camera | Mouse wheel |
 | Move a selected part along an axis | Drag the matching axis arrow |
 | Add a part to the selection | Shift-click |
-| Clear the selection in Logic Editing | Right-click (a right-drag still orbits the camera) |
+| Clear the selection in Connection Editing | Right-click (a right-drag still orbits the camera) |
 
 ### Keyboard shortcuts
 
@@ -141,7 +142,7 @@ These settings apply to bearings connected to the physical Controller. Engines a
 | **Ctrl+C** | Copy the selection |
 | **Ctrl+V** | Paste copied parts and joints |
 | **Delete** | Remove the selection |
-| **Esc** | Exit Logic Editing |
+| **Esc** | Exit Connection Editing |
 
 Shortcuts work while the **Blueprint Editor** window is focused and no text field, other UI control, or popup is capturing input. Mouse controls work while the pointer is over the 3D viewport. There are no keyboard shortcuts for moving or rotating parts; use the Inspector or axis arrows.
 

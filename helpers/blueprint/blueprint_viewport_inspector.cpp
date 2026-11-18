@@ -111,7 +111,7 @@ void renderInspector(const InspectorContext& context) {
                             context.selectAllOfType(group.shapeId, ImGui::GetIO().KeyShift);
                     ImGui::EndDisabled();
                     if (state.logicManipulation && ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Stop Logic Editing before selecting a group.");
+                        ImGui::SetTooltip("Stop Connection Editing before selecting a group.");
                     for (int index : group.indices) {
                         const auto& part = blocks[index];
                         const std::string label = std::string(part.isJoint ? "Joint " : "Part ") +
@@ -192,12 +192,19 @@ void renderInspector(const InspectorContext& context) {
         const std::string selectedPartName = context.partDisplayName
                                                  ? context.partDisplayName(state.selection)
                                                  : Parser::findBlockNameByShapeID(b.shapeID, items);
-        if (!b.isJoint &&
-            (lower(b.shapeID) == controllerShapeId || lower(selectedPartName) == "controller")) {
+        const auto controllerCapabilities =
+            state.shapeConnectionCapabilities.find(lower(b.shapeID));
+        const bool selectedController =
+            !b.isJoint &&
+            (lower(b.shapeID) == controllerShapeId ||
+             (controllerCapabilities != state.shapeConnectionCapabilities.end() &&
+              (controllerCapabilities->second & ShapeControllerJointOutput) != 0) ||
+             lower(selectedPartName).find("controller") == 0);
+        if (selectedController) {
             static int controllerSettingsPart = -1;
             ImGui::Spacing();
             ImGui::SeparatorText("Controller settings");
-            ImGui::TextDisabled("Edit the frame speed and bearing rotation steps.");
+            ImGui::TextDisabled("Edit the frame speed and connected joint steps.");
             ImGui::Text("Time per frame (seconds)");
             float timePerFrame = context.controllerTimePerFrame
                                      ? context.controllerTimePerFrame(state.selection)
@@ -212,57 +219,58 @@ void renderInspector(const InspectorContext& context) {
                 context.setControllerTimePerFrame(state.selection, timePerFrame);
             ImGui::TextDisabled(
                 "Lower positive values make the Controller sequence run faster.");
-            if (ImGui::Button("Edit bearing rotations...", ImVec2(-1.f, 0.f))) {
+            if (ImGui::Button("Edit Controller joints...", ImVec2(-1.f, 0.f))) {
                 controllerSettingsPart = state.selection;
-                ImGui::OpenPopup("ControllerRotationEditor");
+                ImGui::OpenPopup("ControllerJointEditor");
             }
             ImGui::SetNextWindowSize(ImVec2(860.f, 620.f), ImGuiCond_Appearing);
-            if (ImGui::BeginPopupModal(
-                    "ControllerRotationEditor", nullptr, ImGuiWindowFlags_NoResize)) {
+            if (ImGui::BeginPopupModal("ControllerJointEditor", nullptr, ImGuiWindowFlags_NoResize)) {
                 std::string controllerName = context.partDisplayName
                                                  ? context.partDisplayName(controllerSettingsPart)
                                                  : "Controller";
-                ImGui::TextWrapped("%s · connected bearing rotations", controllerName.c_str());
-                ImGui::TextDisabled("Frame 0 is the starting angle. Frames 1–10 set the rotation "
-                                    "steps in degrees.");
+                ImGui::TextWrapped("%s · connected bearings and Pistons", controllerName.c_str());
+                ImGui::TextDisabled("Frame 0 is the starting position. Frames 1–10 set bearing "
+                                    "rotation in degrees or piston extension from 0 to 16.");
                 ImGui::Separator();
-                const auto bearings =
-                    context.controllerBearingSettings
-                        ? context.controllerBearingSettings(controllerSettingsPart)
-                        : std::vector<EditingActions::ControllerBearingSettings>{};
-                ImGui::BeginChild("ControllerRotationList",
+                const auto joints =
+                    context.controllerJointSettings
+                        ? context.controllerJointSettings(controllerSettingsPart)
+                        : std::vector<EditingActions::ControllerJointSettings>{};
+                ImGui::BeginChild("ControllerJointList",
                                   ImVec2(0.f, -ImGui::GetFrameHeightWithSpacing() - 6.f),
                                   true);
-                if (bearings.empty()) {
-                    ImGui::TextDisabled(
-                        "No connected bearings with saved rotation settings were found.");
-                    ImGui::TextWrapped("Connect a bearing to this Controller in Scrap Mechanic, "
-                                       "then reopen the blueprint here.");
+                if (joints.empty()) {
+                    ImGui::TextDisabled("No connected bearings or Pistons with sequence frames "
+                                        "were found.");
+                    ImGui::TextWrapped("Connect bearings or Pistons to this Controller in Scrap "
+                                       "Mechanic, then reopen the blueprint here.");
                 } else {
-                    for (const auto& bearing : bearings) {
-                        ImGui::PushID(std::to_string(bearing.jointId).c_str());
+                    for (const auto& joint : joints) {
+                        ImGui::PushID(std::to_string(joint.jointId).c_str());
                         ImGui::Text("%s · connection %d",
-                                    bearing.name.c_str(),
-                                    bearing.connectionIndex + 1);
+                                    joint.name.c_str(),
+                                    joint.connectionIndex + 1);
                         ImGui::SameLine();
-                        bool reverse = bearing.reverse;
+                        bool reverse = joint.reverse;
                         if (ImGui::Checkbox("Reverse direction", &reverse) &&
-                            context.setControllerBearingReverse)
-                            context.setControllerBearingReverse(
-                                controllerSettingsPart, bearing.jointId, reverse);
-                        if (bearing.frameAngles.empty()) {
-                            ImGui::TextDisabled("No rotation frames are stored for this bearing.");
-                        } else if (ImGui::BeginTable("RotationFrames",
+                            context.setControllerJointReverse)
+                            context.setControllerJointReverse(
+                                controllerSettingsPart, joint.jointId, reverse);
+                        ImGui::TextDisabled(joint.piston ? "Piston extension · 0 to 16"
+                                                         : "Bearing rotation · degrees");
+                        if (joint.frameValues.empty()) {
+                            ImGui::TextDisabled("No sequence frames are stored for this joint.");
+                        } else if (ImGui::BeginTable("JointFrames",
                                                      5,
                                                      ImGuiTableFlags_BordersInnerV |
                                                          ImGuiTableFlags_RowBg |
                                                          ImGuiTableFlags_SizingStretchSame)) {
-                            for (int firstFrame = 0; firstFrame < (int)bearing.frameAngles.size();
+                            for (int firstFrame = 0; firstFrame < (int)joint.frameValues.size();
                                  firstFrame += 5) {
                                 ImGui::TableNextRow();
                                 for (int column = 0; column < 5; ++column) {
                                     const int frameIndex = firstFrame + column;
-                                    if (frameIndex >= (int)bearing.frameAngles.size())
+                                    if (frameIndex >= (int)joint.frameValues.size())
                                         break;
                                     ImGui::TableSetColumnIndex(column);
                                     if (frameIndex == 0)
@@ -270,14 +278,14 @@ void renderInspector(const InspectorContext& context) {
                                     else
                                         ImGui::Text("Frame %d", frameIndex);
                                     ImGui::PushID(frameIndex);
-                                    int angle = bearing.frameAngles[frameIndex];
+                                    int value = joint.frameValues[frameIndex];
                                     ImGui::SetNextItemWidth(-1.f);
-                                    if (ImGui::InputInt("##targetAngle", &angle, 0, 0) &&
-                                        context.setControllerBearingAngle)
-                                        context.setControllerBearingAngle(controllerSettingsPart,
-                                                                          bearing.jointId,
-                                                                          frameIndex,
-                                                                          angle);
+                                    if (ImGui::InputInt("##frameValue", &value, 0, 0) &&
+                                        context.setControllerJointFrameValue)
+                                        context.setControllerJointFrameValue(controllerSettingsPart,
+                                                                             joint.jointId,
+                                                                             frameIndex,
+                                                                             value);
                                     ImGui::PopID();
                                 }
                             }

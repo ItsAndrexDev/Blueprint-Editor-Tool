@@ -5,6 +5,23 @@
 #include <limits>
 
 namespace BlueprintViewport::Internal {
+namespace {
+float pointSegmentDistanceSquared(const ImVec2 point, const ImVec2 start, const ImVec2 end) {
+    const float dx = end.x - start.x;
+    const float dy = end.y - start.y;
+    const float lengthSquared = dx * dx + dy * dy;
+    const float t = lengthSquared > 1e-6f
+                        ? std::clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) /
+                                         lengthSquared,
+                                     0.f,
+                                     1.f)
+                        : 0.f;
+    const float offsetX = point.x - (start.x + dx * t);
+    const float offsetY = point.y - (start.y + dy * t);
+    return offsetX * offsetX + offsetY * offsetY;
+}
+} // namespace
+
 void ViewportCanvas::handleInput() {
     const bool clickedLogicHint = state.logicManipulation && mouse.x >= logicHintMin.x &&
                                   mouse.x <= logicHintMax.x && mouse.y >= logicHintMin.y &&
@@ -38,6 +55,17 @@ void ViewportCanvas::handleInput() {
             }
         int picked = -1;
         float closestDepth = -std::numeric_limits<float>::max();
+        int connectionTargetPick = -1;
+        float closestTargetDepth = -std::numeric_limits<float>::max();
+        int nearbyConnectionTargetPick = -1;
+        float nearestConnectionTargetDistanceSquared = 64.f;
+        std::vector<bool> connectionTargets;
+        if (state.logicManipulation && state.logicSource >= 0) {
+            connectionTargets.resize(blocks.size());
+            for (size_t index = 0; index < blocks.size(); ++index)
+                connectionTargets[index] =
+                    actions.connectionKind(state.logicSource, (int)index) != ConnectionKind::None;
+        }
         if (hitAxis)
             picked = state.selection;
         else
@@ -53,7 +81,28 @@ void ViewportCanvas::handleInput() {
                 const float wb =
                     ((c.y - a.y) * (mouse.x - c.x) + (a.x - c.x) * (mouse.y - c.y)) / denom;
                 const float wc = 1.f - wa - wb;
-                if (wa >= -1e-4f && wb >= -1e-4f && wc >= -1e-4f) {
+                const bool insideTriangle = wa >= -1e-4f && wb >= -1e-4f && wc >= -1e-4f;
+                if (!connectionTargets.empty() && t.block >= 0 &&
+                    t.block < (int)connectionTargets.size() && connectionTargets[t.block]) {
+                    if (insideTriangle) {
+                        const float depth = wa * t.vertexDepth[0] + wb * t.vertexDepth[1] +
+                                            wc * t.vertexDepth[2];
+                        if (depth > closestTargetDepth) {
+                            closestTargetDepth = depth;
+                            connectionTargetPick = t.block;
+                        }
+                    } else {
+                        const float distanceSquared = std::min(
+                            {pointSegmentDistanceSquared(mouse, a, b),
+                             pointSegmentDistanceSquared(mouse, b, c),
+                             pointSegmentDistanceSquared(mouse, c, a)});
+                        if (distanceSquared < nearestConnectionTargetDistanceSquared) {
+                            nearestConnectionTargetDistanceSquared = distanceSquared;
+                            nearbyConnectionTargetPick = t.block;
+                        }
+                    }
+                }
+                if (insideTriangle) {
                     const float depth =
                         wa * t.vertexDepth[0] + wb * t.vertexDepth[1] + wc * t.vertexDepth[2];
                     if (depth > closestDepth) {
@@ -62,11 +111,23 @@ void ViewportCanvas::handleInput() {
                     }
                 }
             }
+        // Joint meshes and small interactive parts can overlap their attachment blocks.
+        // Prefer any compatible target surface under the cursor so an adjacent block
+        // cannot intercept a connection click.
+        if (connectionTargetPick >= 0)
+            picked = connectionTargetPick;
+        else if (nearbyConnectionTargetPick >= 0)
+            picked = nearbyConnectionTargetPick;
         if (state.logicManipulation) {
             if (hitLogicEdge >= 0) {
                 const auto& edge = logicEdges[hitLogicEdge];
-                if (Parser::removeConnectionById(blueprint, blocks, edge.source, edge.targetId))
-                    notify("Logic connection removed");
+                const bool removed = edge.mechanical
+                                         ? Parser::removeJointConnectionById(
+                                               blueprint, blocks, edge.source, edge.targetId)
+                                         : Parser::removeConnectionById(
+                                               blueprint, blocks, edge.source, edge.targetId);
+                if (removed)
+                    notify("Connection removed");
                 if (state.logicSource == edge.source)
                     state.logicSource = -1;
             } else if (picked < 0) {
@@ -74,35 +135,44 @@ void ViewportCanvas::handleInput() {
                 state.selection = -1;
                 state.selectionSet.clear();
                 notify("Selection cleared");
-            } else if (actions.controllerIdForPart(picked) < 0)
-                notify("That part cannot be connected");
-            else if (!actions.canUseAsLogicSource(picked) && state.logicSource < 0)
-                notify("Pistons can be connection targets, not sources");
+            } else if (state.logicSource < 0 && !actions.canUseAsConnectionSource(picked))
+                notify(actions.isPistonPart(picked)
+                           ? "Pistons can receive signals, but cannot be sources"
+                           : "That part cannot start a connection");
             else if (state.logicSource < 0) {
                 state.logicSource = picked;
                 state.selection = picked;
                 state.selectionSet.clear();
                 state.selectionSet.insert(picked);
-                notify("Logic source selected");
+                notify("Connection source selected");
             } else if (ImGui::GetIO().KeyShift) {
-                if (actions.canUseAsLogicSource(picked)) {
+                if (actions.canUseAsConnectionSource(picked)) {
                     state.logicSource = picked;
                     state.selection = picked;
                     state.selectionSet.clear();
                     state.selectionSet.insert(picked);
-                    notify("Logic source changed");
+                    notify("Connection source changed");
                 } else
-                    notify("Pistons can be connection targets, not sources");
+                    notify(actions.isPistonPart(picked)
+                               ? "Pistons can receive signals, but cannot be sources"
+                               : "That part cannot start a connection");
             } else if (picked == state.logicSource) {
                 const std::string itemName = actions.partDisplayName(picked);
-                if (Parser::addDirectedConnection(blueprint, blocks, picked, picked))
-                    notify("Wired " + itemName + " into itself");
+                if (actions.connectionKind(picked, picked) == ConnectionKind::Logic &&
+                    actions.addConnection(picked, picked))
+                    notify("Signal wired from " + itemName + " to itself");
                 else
-                    notify("Already wired " + itemName + " into itself");
-            } else if (Parser::addDirectedConnection(blueprint, blocks, state.logicSource, picked))
-                notify("Logic connection created");
-            else
-                notify("These parts are already connected");
+                    notify("No self-connection is available for " + itemName);
+            } else {
+                const auto kind = actions.connectionKind(state.logicSource, picked);
+                if (kind == ConnectionKind::None)
+                    notify("Those parts cannot connect in that direction");
+                else if (actions.addConnection(state.logicSource, picked))
+                    notify(kind == ConnectionKind::Joint ? "Mechanical connection created"
+                                                         : "Signal connection created");
+                else
+                    notify("Connection was not added; it may exist already or reach a part limit");
+            }
         } else if (!hitAxis) {
             if (ImGui::GetIO().KeyShift) {
                 if (picked >= 0) {

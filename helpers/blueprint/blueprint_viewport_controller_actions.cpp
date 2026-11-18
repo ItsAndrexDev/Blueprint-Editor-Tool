@@ -15,8 +15,13 @@ constexpr const char* controllerShapeId = "12862001-666c-4bdd-8326-a1f43610d28b"
 constexpr const char* pistonShapeId = "260b4597-f1ac-409c-8e6b-90c998c5fe94";
 
 bool isPhysicalController(const Parser::Block& part, const std::string& displayName) {
-    return !part.isJoint &&
-           (lower(part.shapeID) == controllerShapeId || lower(displayName) == "controller");
+    if (part.isJoint)
+        return false;
+    const auto capabilities = state.shapeConnectionCapabilities.find(lower(part.shapeID));
+    return lower(part.shapeID) == controllerShapeId ||
+           (capabilities != state.shapeConnectionCapabilities.end() &&
+            (capabilities->second & ShapeControllerJointOutput) != 0) ||
+           lower(displayName).find("controller") == 0;
 }
 } // namespace
 
@@ -69,7 +74,122 @@ bool EditingActions::isPistonPart(int index) const {
 }
 
 bool EditingActions::canUseAsLogicSource(int index) {
-    return !isPistonPart(index) && controllerIdForPart(index) >= 0;
+    if (isPistonPart(index) || controllerIdForPart(index) < 0)
+        return false;
+    const auto shape = state.shapeConnectionCapabilities.find(lower(blocks_[index].shapeID));
+    if (shape == state.shapeConnectionCapabilities.end())
+        return true; // Preserve support for modded interactives absent from the game catalog.
+    if (shape->second & ShapeLogicOutput)
+        return true;
+    json* controller = controllerForPart(index);
+    return controller && controller->contains("controllers") &&
+           (*controller)["controllers"].is_array();
+}
+
+bool EditingActions::canUseAsJointSource(int index) {
+    if (index < 0 || index >= (int)blocks_.size() || blocks_[index].isJoint ||
+        controllerIdForPart(index) < 0)
+        return false;
+    const auto shape = state.shapeConnectionCapabilities.find(lower(blocks_[index].shapeID));
+    if (shape == state.shapeConnectionCapabilities.end()) {
+        json* controller = controllerForPart(index);
+        return controller && controller->contains("joints") &&
+               (*controller)["joints"].is_array();
+    }
+    return (shape->second & (ShapeEngineJointOutput | ShapeControllerJointOutput |
+                             ShapeSteeringJointOutput)) != 0;
+}
+
+bool EditingActions::canUseAsConnectionSource(int index) {
+    return canUseAsLogicSource(index) || canUseAsJointSource(index);
+}
+
+ConnectionKind EditingActions::connectionKind(int sourceIndex, int targetIndex) {
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= (int)blocks_.size() ||
+        targetIndex >= (int)blocks_.size())
+        return ConnectionKind::None;
+    const auto sourceShape =
+        state.shapeConnectionCapabilities.find(lower(blocks_[sourceIndex].shapeID));
+    const auto targetShape =
+        state.shapeConnectionCapabilities.find(lower(blocks_[targetIndex].shapeID));
+    const auto sourceCapabilities = sourceShape == state.shapeConnectionCapabilities.end()
+                                       ? 0u
+                                       : sourceShape->second;
+    const auto targetCapabilities = targetShape == state.shapeConnectionCapabilities.end()
+                                       ? 0u
+                                       : targetShape->second;
+    const bool targetBearing = (targetCapabilities & ShapeBearingJoint) != 0;
+    const bool targetSuspension = (targetCapabilities & ShapeSuspensionJoint) != 0;
+    const bool targetPiston = (targetCapabilities & ShapePistonJoint) != 0;
+    const bool controller = (sourceCapabilities & ShapeControllerJointOutput) != 0;
+    const bool engine = (sourceCapabilities & ShapeEngineJointOutput) != 0;
+    const bool driverSeat = (sourceCapabilities & ShapeSteeringJointOutput) != 0;
+    if (controller && isPistonPart(targetIndex)) {
+        json* source = controllerForPart(sourceIndex);
+        const auto targetId = controllerIdForPart(targetIndex);
+        if (source && targetId >= 0 && source->contains("controllers") &&
+            (*source)["controllers"].is_array())
+            for (const auto& connection : (*source)["controllers"])
+                if (connection.is_object() && connection.contains("id") &&
+                    connection["id"].is_number_integer())
+                    try {
+                        if (connection["id"].get<std::int64_t>() == targetId)
+                            return ConnectionKind::Logic;
+                    } catch (...) {
+                    }
+    }
+    if (canUseAsJointSource(sourceIndex) && blocks_[targetIndex].isJoint &&
+        blocks_[targetIndex].jointId >= 0 &&
+        ((controller && (targetBearing || targetPiston)) || (engine && targetBearing) ||
+         (driverSeat && (targetBearing || targetSuspension))))
+        return ConnectionKind::Joint;
+
+    if (!canUseAsLogicSource(sourceIndex))
+        return ConnectionKind::None;
+    if (isPistonPart(targetIndex))
+        return ConnectionKind::Logic;
+    if (controllerIdForPart(targetIndex) < 0)
+        return ConnectionKind::None;
+
+    const bool seatSource = (sourceCapabilities & ShapeSeatOutput) != 0;
+    if ((targetCapabilities & ShapeButtonSwitchTarget) != 0)
+        return seatSource ? ConnectionKind::Logic : ConnectionKind::None;
+    if (seatSource) {
+        const bool driverSeatTarget =
+            (targetCapabilities & (ShapeEngineTarget | ShapeThrusterTarget |
+                                   ShapeControllerTarget)) != 0;
+        return driverSeat && driverSeatTarget ? ConnectionKind::Logic : ConnectionKind::None;
+    }
+    if ((targetCapabilities & ShapeSeatOutput) != 0)
+        return ConnectionKind::None;
+    return ConnectionKind::Logic;
+}
+
+bool EditingActions::addConnection(int sourceIndex, int targetIndex) {
+    switch (connectionKind(sourceIndex, targetIndex)) {
+    case ConnectionKind::Logic: {
+        return Parser::addDirectedConnection(blueprint_, blocks_, sourceIndex, targetIndex);
+    }
+    case ConnectionKind::Joint: {
+        const auto shape =
+            state.shapeConnectionCapabilities.find(lower(blocks_[sourceIndex].shapeID));
+        if (shape != state.shapeConnectionCapabilities.end() &&
+            (shape->second & ShapeGasEngineBearingLimit) != 0) {
+            json* controller = controllerForPart(sourceIndex);
+            if (controller && controller->contains("joints") &&
+                (*controller)["joints"].is_array() &&
+                (*controller)["joints"].size() >= 5)
+                return false;
+        }
+        const bool controllerSequence = shape != state.shapeConnectionCapabilities.end() &&
+                                        (shape->second & ShapeControllerJointOutput) != 0;
+        return Parser::addJointConnection(
+            blueprint_, blocks_, sourceIndex, targetIndex, controllerSequence);
+    }
+    case ConnectionKind::None:
+        return false;
+    }
+    return false;
 }
 
 float EditingActions::controllerTimePerFrame(int index) {
@@ -154,9 +274,9 @@ void EditingActions::setSelectionLogicGateMode(int mode) {
     }
 }
 
-std::vector<EditingActions::ControllerBearingSettings>
-EditingActions::controllerBearingSettings(int index) {
-    std::vector<ControllerBearingSettings> result;
+std::vector<EditingActions::ControllerJointSettings>
+EditingActions::controllerJointSettings(int index) {
+    std::vector<ControllerJointSettings> result;
     if (index < 0 || index >= (int)blocks_.size() ||
         !isPhysicalController(blocks_[index], partDisplayName(index)))
         return result;
@@ -192,13 +312,21 @@ EditingActions::controllerBearingSettings(int index) {
         if (!joint || !joint->contains("shapeId") || !(*joint)["shapeId"].is_string())
             continue;
         const std::string shapeId = (*joint)["shapeId"].get<std::string>();
-        std::string partName = Parser::findBlockNameByShapeID(shapeId, items_);
-        if (lower(partName).find("bearing") == std::string::npos)
+        const auto shape = state.shapeConnectionCapabilities.find(lower(shapeId));
+        if (shape == state.shapeConnectionCapabilities.end() ||
+            (shape->second & (ShapeBearingJoint | ShapePistonJoint)) == 0)
             continue;
+        std::string partName = Parser::findBlockNameByShapeID(shapeId, items_);
+        if (partName.empty() || partName == "Unknown part") {
+            const auto catalogEntry = state.catalog.find(lower(shapeId));
+            if (catalogEntry != state.catalog.end())
+                partName = displayNameFromShapeSet(catalogEntry->second.name);
+        }
 
-        ControllerBearingSettings settings;
+        ControllerJointSettings settings;
         settings.jointId = jointId;
         settings.connectionIndex = (int)result.size();
+        settings.piston = (shape->second & ShapePistonJoint) != 0;
         if (reference.contains("index") && reference["index"].is_number_integer())
             try {
                 settings.connectionIndex = reference["index"].get<int>();
@@ -208,19 +336,19 @@ EditingActions::controllerBearingSettings(int index) {
         settings.reverse = reference.contains("reverse") && reference["reverse"].is_boolean()
                                ? reference["reverse"].get<bool>()
                                : false;
-        settings.frameAngles.reserve(reference["frames"].size());
+        const char* frameKey = settings.piston ? "targetLength" : "targetAngle";
+        settings.frameValues.reserve(reference["frames"].size());
         for (const auto& frame : reference["frames"]) {
-            int angle = 0;
-            if (frame.is_object() && frame.contains("targetAngle") &&
-                frame["targetAngle"].is_number())
+            int value = 0;
+            if (frame.is_object() && frame.contains(frameKey) && frame[frameKey].is_number())
                 try {
-                    const double value = frame["targetAngle"].get<double>();
-                    angle = (int)std::clamp(std::llround(value),
+                    const double storedValue = frame[frameKey].get<double>();
+                    value = (int)std::clamp(std::llround(storedValue),
                                             (long long)std::numeric_limits<int>::min(),
                                             (long long)std::numeric_limits<int>::max());
                 } catch (...) {
                 }
-            settings.frameAngles.push_back(angle);
+            settings.frameValues.push_back(value);
         }
         result.push_back(std::move(settings));
     }
@@ -232,15 +360,18 @@ EditingActions::controllerBearingSettings(int index) {
     return result;
 }
 
-bool EditingActions::setControllerBearingAngle(int index,
-                                               std::int64_t jointId,
-                                               int frameIndex,
-                                               int angle) {
+bool EditingActions::setControllerJointFrameValue(int index,
+                                                  std::int64_t jointId,
+                                                  int frameIndex,
+                                                  int value) {
     if (index < 0 || index >= (int)blocks_.size() ||
         !isPhysicalController(blocks_[index], partDisplayName(index)) || frameIndex < 0)
         return false;
     json* controller = controllerForPart(index);
     if (!controller || !controller->contains("joints") || !(*controller)["joints"].is_array())
+        return false;
+    if (!blueprint_.is_object() || !blueprint_.contains("joints") ||
+        !blueprint_["joints"].is_array())
         return false;
     for (auto& reference : (*controller)["joints"]) {
         if (!reference.is_object() || !reference.contains("id") ||
@@ -255,33 +386,54 @@ bool EditingActions::setControllerBearingAngle(int index,
         if (!reference.contains("frames") || !reference["frames"].is_array() ||
             frameIndex >= (int)reference["frames"].size())
             return false;
+        bool piston = false;
+        for (const auto& joint : blueprint_["joints"])
+            if (joint.is_object() && joint.contains("id") &&
+                joint["id"].is_number_integer() && joint.contains("shapeId") &&
+                joint["shapeId"].is_string())
+                try {
+                    if (joint["id"].get<std::int64_t>() == jointId) {
+                        const auto shape = state.shapeConnectionCapabilities.find(
+                            lower(joint["shapeId"].get<std::string>()));
+                        piston = shape != state.shapeConnectionCapabilities.end() &&
+                                 (shape->second & ShapePistonJoint) != 0;
+                        break;
+                    }
+                } catch (...) {
+                }
         auto& frames = reference["frames"];
         if (!frames[frameIndex].is_object())
             frames[frameIndex] = json::object();
-        frames[frameIndex]["targetAngle"] = angle;
+        const char* frameKey = piston ? "targetLength" : "targetAngle";
+        frames[frameIndex][frameKey] = piston ? std::clamp(value, 0, 16) : value;
         if (!frames[0].is_object())
             frames[0] = json::object();
-        long long totalAngle = 0;
-        for (const auto& frame : frames)
-            if (frame.is_object() && frame.contains("targetAngle") &&
-                frame["targetAngle"].is_number())
-                try {
-                    const double value = frame["targetAngle"].get<double>();
-                    if (std::isfinite(value))
-                        totalAngle += (long long)std::clamp(
-                            std::llround(value), (long long)-1000000000, (long long)1000000000);
-                } catch (...) {
-                }
-        reference["startAngle"] = frames[0].value("targetAngle", 0);
-        reference["endAngle"] = (int)std::clamp(totalAngle,
-                                                (long long)std::numeric_limits<int>::min(),
-                                                (long long)std::numeric_limits<int>::max());
+        if (!piston) {
+            long long totalAngle = 0;
+            for (const auto& frame : frames)
+                if (frame.is_object() && frame.contains(frameKey) &&
+                    frame[frameKey].is_number())
+                    try {
+                        const double storedValue = frame[frameKey].get<double>();
+                        if (std::isfinite(storedValue))
+                            totalAngle += (long long)std::clamp(
+                                std::llround(storedValue),
+                                (long long)-1000000000,
+                                (long long)1000000000);
+                    } catch (...) {
+                    }
+            reference["startAngle"] = frames[0].value(frameKey, 0);
+            reference["endAngle"] = (int)std::clamp(
+                totalAngle,
+                (long long)std::numeric_limits<int>::min(),
+                (long long)std::numeric_limits<int>::max());
+        }
         return true;
     }
     return false;
 }
 
-bool EditingActions::setControllerBearingReverse(int index, std::int64_t jointId, bool reverse) {
+bool EditingActions::setControllerJointReverse(int index, std::int64_t jointId, bool reverse) {
     if (index < 0 || index >= (int)blocks_.size() ||
         !isPhysicalController(blocks_[index], partDisplayName(index)))
         return false;

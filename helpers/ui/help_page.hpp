@@ -71,28 +71,33 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
     ImGui::BulletText("Gate Labels: On displays each logic gate's current operation in the "
                       "viewport. Select it again to hide labels.");
     ImGui::BulletText(
-        "Start Logic Editing to edit directed connections between interactive parts. Click a "
-        "connectable part to choose a source, then click a target to connect it. Pistons can be "
-        "targets, but cannot be sources. Shift-click another part to switch the source; click the "
-        "source itself to connect it to itself.");
+        "Start Connection Editing to manage signal and mechanical links. Buttons, switches, "
+        "sensors, Logic Gates, and Timers send signals to supported interactive parts. Seats can "
+        "connect to buttons and switches; Driver's Seats can also connect to engines, thrusters, "
+        "Controllers, and bearings. Signal sources can target Pistons, but Pistons cannot be "
+        "sources. Engines connect to bearings, Driver's Seats to bearings and suspensions, and "
+        "physical Controllers to bearings and Pistons for sequences. Gas Engines can drive up to "
+        "five bearings.");
+    ImGui::BulletText("Click a source, then a compatible target. Signal links show arrows; mechanical "
+                      "joint links use dashed lines. Shift-click changes the source. Click a "
+                      "connection to remove it. Click empty space or right-click to clear selection.");
     ImGui::BulletText(
         "Show all connections while editing is off by default. With a source selected, it shows "
         "only arrows to or from that source. Turn it on to show every connection. With no source "
         "selected, all connections stay visible so you can choose one. Its button shows On or Off, "
-        "is available during Logic Editing, and resets to Off when you exit the mode.");
-    ImGui::BulletText("Click a connection arrow to remove that connection. Click empty viewport "
-                      "space or right-click to clear the source and selection while staying in "
-                      "Logic Editing. Stop Logic Editing or Esc exits the mode.");
+        "is available during Connection Editing, and resets to Off when you exit the mode.");
+    ImGui::BulletText("Right-click clears the source and selection while staying in Connection "
+                      "Editing. Stop Connection Editing or Esc exits the mode.");
     ImGui::Spacing();
 
-    ImGui::SeparatorText("5. Physical Controller bearing rotations");
+    ImGui::SeparatorText("5. Physical Controller joint sequences");
     ImGui::BulletText("Select the physical Controller part to edit its seconds-per-frame speed. "
-                      "Lower positive values run faster. Open Controller settings > Edit bearing "
-                      "rotations... to edit connected bearing rotations; this does not edit "
-                      "engines or logic-gate operations.");
-    ImGui::BulletText("Frame 0 is the bearing's starting angle. Frames 1-10 are the rotation "
-                      "steps, in degrees. Reverse direction flips that bearing's sequence. Only "
-                      "connected bearings with saved settings are listed.");
+                      "Lower positive values run faster. Open Controller settings > Edit Controller "
+                      "joints... to edit bearing rotations and Piston extension lengths; this does "
+                      "not edit engines or Logic Gate operations.");
+    ImGui::BulletText("Frame 0 is the joint's starting position. Frames 1-10 set bearing rotation "
+                      "in degrees or Piston extension from 0 to 16. Reverse direction flips the "
+                      "joint's sequence. Connected bearings and Pistons with saved frames are listed.");
     ImGui::Spacing();
 
     ImGui::SeparatorText("6. Copy, paste, and history");
@@ -148,7 +153,7 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
                                       {"Ctrl+C", "Copy the selection"},
                                       {"Ctrl+V", "Paste copied parts and joints"},
                                       {"Delete", "Remove the selection"},
-                                      {"Esc", "Exit Logic Editing"}};
+                                      {"Esc", "Exit Connection Editing"}};
         for (const auto& row : shortcuts) {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);

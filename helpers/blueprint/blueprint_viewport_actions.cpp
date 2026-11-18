@@ -25,27 +25,31 @@ void EditingActions::selectPart(int index, bool additive) {
     if (index < 0 || index >= (int)blocks_.size())
         return;
     if (state.logicManipulation) {
-        if (isPistonPart(index)) {
-            if (state.logicSource < 0) {
-                BlueprintViewport::notify("Select an interactive source before a piston target");
+        if (state.logicSource >= 0) {
+            const auto kind = connectionKind(state.logicSource, index);
+            if (kind != ConnectionKind::None) {
+                const std::string targetName = partDisplayName(index);
+                if (addConnection(state.logicSource, index))
+                    BlueprintViewport::notify(
+                        (kind == ConnectionKind::Joint ? "Connected to " : "Signal connected to ") +
+                        targetName);
+                else
+                    BlueprintViewport::notify(
+                        "Connection was not added; it may exist already or reach a part limit");
                 return;
             }
-            const std::string itemName = partDisplayName(index);
-            if (Parser::addDirectedConnection(blueprint_, blocks_, state.logicSource, index))
-                BlueprintViewport::notify("Connected source to " + itemName);
-            else
-                BlueprintViewport::notify("These parts are already connected");
-            return;
         }
-        if (!canUseAsLogicSource(index)) {
-            BlueprintViewport::notify("That part cannot be used as a logic source");
+        if (!canUseAsConnectionSource(index)) {
+            BlueprintViewport::notify(isPistonPart(index)
+                                          ? "Pistons can receive signals, but cannot be sources"
+                                          : "That part cannot start a connection");
             return;
         }
         state.selection = index;
         state.selectionSet.clear();
         state.selectionSet.insert(index);
         state.logicSource = index;
-        BlueprintViewport::notify("Logic source selected from the parts list");
+        BlueprintViewport::notify("Connection source selected from the parts list");
         return;
     }
     if (!additive)

@@ -63,6 +63,24 @@ struct Entry {
     bool centerMeshOnFootprint{};
 };
 
+enum ShapeConnectionCapability : std::uint32_t {
+    ShapeLogicOutput = 1u << 0,
+    ShapeEngineJointOutput = 1u << 1,
+    ShapeControllerJointOutput = 1u << 2,
+    ShapeSteeringJointOutput = 1u << 3,
+    ShapeBearingJoint = 1u << 4,
+    ShapeSuspensionJoint = 1u << 5,
+    ShapeSeatOutput = 1u << 6,
+    ShapeButtonSwitchTarget = 1u << 7,
+    ShapeEngineTarget = 1u << 8,
+    ShapeThrusterTarget = 1u << 9,
+    ShapeControllerTarget = 1u << 10,
+    ShapePistonJoint = 1u << 11,
+    ShapeGasEngineBearingLimit = 1u << 12,
+};
+
+enum class ConnectionKind { None, Logic, Joint };
+
 struct SceneVertex {
     float x, y, z, r, g, b, u, v;
 };
@@ -82,6 +100,7 @@ struct GlStateSnapshot {
 // Persistent viewport data shared by the UI, asset pipeline, and GL renderer.
 struct State {
     std::unordered_map<std::string, Entry> catalog;
+    std::unordered_map<std::string, std::uint32_t> shapeConnectionCapabilities;
     std::unordered_set<std::string> blockShapes;
     std::unordered_set<std::string> footprintAnchoredParts;
     std::unordered_map<std::string, V3> shapeSizes;
@@ -181,20 +200,28 @@ class EditingActions {
     std::string partDisplayName(int index) const;
     int logicGateModeForPart(int index) const;
     void setSelectionLogicGateMode(int mode);
-    struct ControllerBearingSettings {
+    struct ControllerJointSettings {
         std::int64_t jointId = -1;
         int connectionIndex = -1;
         std::string name;
+        bool piston{};
         bool reverse{};
-        std::vector<int> frameAngles;
+        std::vector<int> frameValues;
     };
-    std::vector<ControllerBearingSettings> controllerBearingSettings(int index);
-    bool setControllerBearingAngle(int index, std::int64_t jointId, int frameIndex, int angle);
-    bool setControllerBearingReverse(int index, std::int64_t jointId, bool reverse);
+    std::vector<ControllerJointSettings> controllerJointSettings(int index);
+    bool setControllerJointFrameValue(int index,
+                                      std::int64_t jointId,
+                                      int frameIndex,
+                                      int value);
+    bool setControllerJointReverse(int index, std::int64_t jointId, bool reverse);
     float controllerTimePerFrame(int index);
     bool setControllerTimePerFrame(int index, float seconds);
     bool isPistonPart(int index) const;
     bool canUseAsLogicSource(int index);
+    bool canUseAsJointSource(int index);
+    bool canUseAsConnectionSource(int index);
+    ConnectionKind connectionKind(int sourceIndex, int targetIndex);
+    bool addConnection(int sourceIndex, int targetIndex);
     void selectPart(int index, bool additive);
     void selectAllOfType(const std::string& shapeId, bool additive);
     void addSelectionGroup(int index);
@@ -232,10 +259,10 @@ struct InspectorContext {
     std::function<int(int)> logicGateMode;
     std::function<void(int)> setSelectionLogicGateMode;
     std::function<std::string(int)> partDisplayName;
-    std::function<std::vector<EditingActions::ControllerBearingSettings>(int)>
-        controllerBearingSettings;
-    std::function<bool(int, std::int64_t, int, int)> setControllerBearingAngle;
-    std::function<bool(int, std::int64_t, bool)> setControllerBearingReverse;
+    std::function<std::vector<EditingActions::ControllerJointSettings>(int)>
+        controllerJointSettings;
+    std::function<bool(int, std::int64_t, int, int)> setControllerJointFrameValue;
+    std::function<bool(int, std::int64_t, bool)> setControllerJointReverse;
     std::function<float(int)> controllerTimePerFrame;
     std::function<bool(int, float)> setControllerTimePerFrame;
     std::function<void(int, bool)> selectPart;

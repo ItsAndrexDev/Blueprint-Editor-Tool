@@ -41,6 +41,7 @@ void resetSelection() {
 void setGameDirectory(const std::filesystem::path& directory) {
     state.game = directory;
     state.catalog.clear();
+    state.shapeConnectionCapabilities.clear();
     state.blockShapes.clear();
     state.footprintAnchoredParts.clear();
     state.shapeSizes.clear();
@@ -100,7 +101,7 @@ void render(json& blueprint,
         state.selectionSet.insert(state.selection);
     EditingActions actions(blueprint, blueprintPath, blocks, items);
     if (state.logicSource < 0 || state.logicSource >= (int)blocks.size() ||
-        !actions.canUseAsLogicSource(state.logicSource))
+        !actions.canUseAsConnectionSource(state.logicSource))
         state.logicSource = -1;
     auto isSelected = [&actions](int index) {
         return actions.isSelected(index);
@@ -144,15 +145,15 @@ void render(json& blueprint,
     auto selectAllOfType = [&actions](const std::string& shapeId, bool additive) {
         actions.selectAllOfType(shapeId, additive);
     };
-    auto controllerBearingSettings = [&actions](int index) {
-        return actions.controllerBearingSettings(index);
+    auto controllerJointSettings = [&actions](int index) {
+        return actions.controllerJointSettings(index);
     };
-    auto setControllerBearingAngle =
-        [&actions](int index, std::int64_t jointId, int frame, int angle) {
-            return actions.setControllerBearingAngle(index, jointId, frame, angle);
+    auto setControllerJointFrameValue =
+        [&actions](int index, std::int64_t jointId, int frame, int value) {
+            return actions.setControllerJointFrameValue(index, jointId, frame, value);
         };
-    auto setControllerBearingReverse = [&actions](int index, std::int64_t jointId, bool reverse) {
-        return actions.setControllerBearingReverse(index, jointId, reverse);
+    auto setControllerJointReverse = [&actions](int index, std::int64_t jointId, bool reverse) {
+        return actions.setControllerJointReverse(index, jointId, reverse);
     };
     auto controllerTimePerFrame = [&actions](int index) {
         return actions.controllerTimePerFrame(index);
@@ -246,7 +247,8 @@ void render(json& blueprint,
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.10f, .36f, .41f, 1.f));
     }
     const bool clickedLogicButton =
-        ImGui::Button(state.logicManipulation ? "Stop Logic Editing" : "Start Logic Editing");
+        ImGui::Button(state.logicManipulation ? "Stop Connection Editing"
+                                              : "Start Connection Editing");
     if (logicButtonWasActive)
         ImGui::PopStyleColor(3);
     if (clickedLogicButton) {
@@ -256,8 +258,8 @@ void render(json& blueprint,
             state.showAllLogicConnections = false;
         state.dragSelection.clear();
         state.dragAxis = 0;
-        notify(state.logicManipulation ? "Logic manipulation enabled"
-                                       : "Logic manipulation disabled");
+        notify(state.logicManipulation ? "Connection editing enabled"
+                                       : "Connection editing disabled");
     }
     ImGui::SameLine();
     const bool showAllConnectionsButtonWasActive = state.showAllLogicConnections;
@@ -284,9 +286,10 @@ void render(json& blueprint,
         ImGui::SameLine();
     if (state.logicManipulation)
         ImGui::TextWrapped(
-            "Click a source, then targets. Click the source again to wire it into "
-            "itself. Shift-click to switch sources; click empty space or right-click to "
-            "clear selection. Click an arrow to remove a link. Esc exits.");
+            "Click a signal source or engine, seat, or Controller, then click a compatible target. "
+            "Signal links can target Pistons; mechanical links connect engines, driver seats, and "
+            "Controllers to supported joints. Shift-click changes source; click a connection to "
+            "remove it. Right-click clears selection; Esc exits.");
     float avail = ImGui::GetContentRegionAvail().x;
     float inspector = std::clamp(avail * .25f, 230.f, 330.f);
     ViewportCanvas canvas(blueprint, blocks, actions);
@@ -304,9 +307,9 @@ void render(json& blueprint,
                                      logicGateModeForPart,
                                      setSelectionLogicGateMode,
                                      partDisplayName,
-                                     controllerBearingSettings,
-                                     setControllerBearingAngle,
-                                     setControllerBearingReverse,
+                                     controllerJointSettings,
+                                     setControllerJointFrameValue,
+                                     setControllerJointReverse,
                                      controllerTimePerFrame,
                                      setControllerTimePerFrame,
                                      selectPart,

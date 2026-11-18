@@ -43,6 +43,7 @@ class ViewportCanvas {
         int target{};
         std::int64_t targetId{};
         std::vector<ImVec2> path;
+        bool mechanical{};
     };
 
     struct AxisHandle {

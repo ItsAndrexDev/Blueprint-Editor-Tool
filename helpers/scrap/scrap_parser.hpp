@@ -96,10 +96,19 @@ bool addDirectedConnection(json& blueprint,
                            const std::vector<Block>& blocks,
                            int sourceIndex,
                            int targetIndex);
+bool addJointConnection(json& blueprint,
+                        const std::vector<Block>& blocks,
+                        int sourceIndex,
+                        int targetIndex,
+                        bool controllerSequence);
 bool removeConnectionById(json& blueprint,
                           const std::vector<Block>& blocks,
                           int sourceIndex,
                           std::int64_t targetControllerId);
+bool removeJointConnectionById(json& blueprint,
+                               const std::vector<Block>& blocks,
+                               int sourceIndex,
+                               std::int64_t targetJointId);
 bool saveBlueprint(const std::string& filepath, const json& blueprint);
 std::string findBlockNameByShapeID(const std::string& shapeID, const json& items);
 std::string findShapeIDByBlockName(const std::string& blockName, const json& items);
