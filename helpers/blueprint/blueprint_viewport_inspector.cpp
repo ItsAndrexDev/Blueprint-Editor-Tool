@@ -215,10 +215,12 @@ void renderInspector(const InspectorContext& context) {
                                   0.1f,
                                   0.5f,
                                   "%.3f") &&
-                context.setControllerTimePerFrame)
+                context.setControllerTimePerFrame) {
+                timePerFrame = std::max(0.f, timePerFrame);
                 context.setControllerTimePerFrame(state.selection, timePerFrame);
+            }
             ImGui::TextDisabled(
-                "Lower positive values make the Controller sequence run faster.");
+                "Zero removes the frame delay; positive values slow the sequence.");
             if (ImGui::Button("Edit Controller joints...", ImVec2(-1.f, 0.f))) {
                 controllerSettingsPart = state.selection;
                 ImGui::OpenPopup("ControllerJointEditor");
@@ -242,22 +244,27 @@ void renderInspector(const InspectorContext& context) {
                 if (joints.empty()) {
                     ImGui::TextDisabled("No connected bearings or Pistons with sequence frames "
                                         "were found.");
-                    ImGui::TextWrapped("Connect bearings or Pistons to this Controller in Scrap "
-                                       "Mechanic, then reopen the blueprint here.");
+                    ImGui::TextWrapped("Use Connection Editing to connect bearings or Pistons to "
+                                       "this Controller.");
                 } else {
                     for (const auto& joint : joints) {
                         ImGui::PushID(std::to_string(joint.jointId).c_str());
                         ImGui::Text("%s · connection %d",
                                     joint.name.c_str(),
                                     joint.connectionIndex + 1);
-                        ImGui::SameLine();
-                        bool reverse = joint.reverse;
-                        if (ImGui::Checkbox("Reverse direction", &reverse) &&
-                            context.setControllerJointReverse)
-                            context.setControllerJointReverse(
-                                controllerSettingsPart, joint.jointId, reverse);
-                        ImGui::TextDisabled(joint.piston ? "Piston extension · 0 to 16"
-                                                         : "Bearing rotation · degrees");
+                        if (!joint.piston) {
+                            ImGui::SameLine();
+                            bool reverse = joint.reverse;
+                            if (ImGui::Checkbox("Reverse direction", &reverse) &&
+                                context.setControllerJointReverse)
+                                context.setControllerJointReverse(
+                                    controllerSettingsPart, joint.referenceId, reverse);
+                        }
+                        if (joint.piston)
+                            ImGui::TextDisabled("Piston setting · 0 to %d",
+                                                joint.frameValueMaximum);
+                        else
+                            ImGui::TextDisabled("Bearing rotation · degrees");
                         if (joint.frameValues.empty()) {
                             ImGui::TextDisabled("No sequence frames are stored for this joint.");
                         } else if (ImGui::BeginTable("JointFrames",
@@ -283,7 +290,7 @@ void renderInspector(const InspectorContext& context) {
                                     if (ImGui::InputInt("##frameValue", &value, 0, 0) &&
                                         context.setControllerJointFrameValue)
                                         context.setControllerJointFrameValue(controllerSettingsPart,
-                                                                             joint.jointId,
+                                                                             joint.referenceId,
                                                                              frameIndex,
                                                                              value);
                                     ImGui::PopID();

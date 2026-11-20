@@ -75,8 +75,9 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
         "sensors, Logic Gates, and Timers send signals to supported interactive parts. Seats can "
         "connect to buttons and switches; Driver's Seats can also connect to engines, thrusters, "
         "Controllers, and bearings. Signal sources can target Pistons, but Pistons cannot be "
-        "sources. Engines connect to bearings, Driver's Seats to bearings and suspensions, and "
-        "physical Controllers to bearings and Pistons for sequences. Gas Engines can drive up to "
+        "sources. Physical Controllers can create sequenced Piston links. Engines connect to "
+        "bearings, Driver's Seats to bearings and suspensions, and physical Controllers to "
+        "bearings. Gas Engines can drive up to "
         "five bearings.");
     ImGui::BulletText("Click a source, then a compatible target. Signal links show arrows; mechanical "
                       "joint links use dashed lines. Shift-click changes the source. Click a "
@@ -91,13 +92,13 @@ inline void renderHelpPage(ImGuiID loaderDockId) {
     ImGui::Spacing();
 
     ImGui::SeparatorText("5. Physical Controller joint sequences");
-    ImGui::BulletText("Select the physical Controller part to edit its seconds-per-frame speed. "
-                      "Lower positive values run faster. Open Controller settings > Edit Controller "
-                      "joints... to edit bearing rotations and Piston extension lengths; this does "
-                      "not edit engines or Logic Gate operations.");
-    ImGui::BulletText("Frame 0 is the joint's starting position. Frames 1-10 set bearing rotation "
-                      "in degrees or Piston extension from 0 to 16. Reverse direction flips the "
-                      "joint's sequence. Connected bearings and Pistons with saved frames are listed.");
+    ImGui::BulletText("Select the physical Controller part to edit its seconds-per-frame time. "
+                      "Zero is allowed; positive values add delay between frames. Open Controller "
+                      "settings > Edit Controller joints... to edit bearing rotations and Piston "
+                      "sequence settings; this does not edit engines or Logic Gate operations.");
+    ImGui::BulletText("Frame 0 is the starting position. Frames 1-10 set bearing rotation in "
+                      "degrees or a Piston setting from 0 to 15. Reverse direction flips bearing "
+                      "sequences. Connected bearings and Pistons with saved frames are listed.");
     ImGui::Spacing();
 
     ImGui::SeparatorText("6. Copy, paste, and history");

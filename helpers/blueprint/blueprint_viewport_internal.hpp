@@ -202,9 +202,12 @@ class EditingActions {
     void setSelectionLogicGateMode(int mode);
     struct ControllerJointSettings {
         std::int64_t jointId = -1;
+        std::int64_t referenceId = -1;
         int connectionIndex = -1;
         std::string name;
         bool piston{};
+        bool controllerSequence{};
+        int frameValueMaximum = 16;
         bool reverse{};
         std::vector<int> frameValues;
     };

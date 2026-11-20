@@ -95,7 +95,8 @@ bool pasteSelectionClipboard(json& blueprint,
 bool addDirectedConnection(json& blueprint,
                            const std::vector<Block>& blocks,
                            int sourceIndex,
-                           int targetIndex);
+                           int targetIndex,
+                           bool controllerPistonSequence = false);
 bool addJointConnection(json& blueprint,
                         const std::vector<Block>& blocks,
                         int sourceIndex,

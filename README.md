@@ -90,24 +90,24 @@ Logic gates and physical Controllers are different parts and have separate setti
 1. Select **Start Connection Editing**.
 2. Click a signal source to choose it. Click a compatible target to create the link. The editor reads connection capabilities from the installed game ShapeSets, including installed part variants.
 3. Buttons, switches, sensors, Logic Gates, and Timers send signals to supported interactive parts. A Seat can connect to buttons and switches; a Driver’s Seat can also connect to engines, thrusters, Controllers, and bearings. Signal sources can target Pistons, but Pistons cannot be sources.
-4. Mechanical links use separate blueprint data: engines connect to bearings, Driver’s Seats connect to bearings and suspensions, and physical Controllers connect to bearings and Pistons for sequenced movement. These links appear as dashed lines.
+4. Mechanical links use separate blueprint data: engines connect to bearings, Driver’s Seats connect to bearings and suspensions, and physical Controllers connect to bearings. These links appear as dashed lines. Controller-to-Piston sequences are stored as directed Controller links with per-frame settings.
    Gas Engines can drive up to five bearings, matching the game handbook’s stated limit.
 5. **Shift-click** a different source to switch it. Click a connection line or arrow to remove that link. **Show all connections while editing** is off by default; with a source selected it shows links to or from that source. Turn it on to show every link. The button resets to **Off** when you exit the mode.
 6. Click empty viewport space or **right-click** to clear the source and selection. Select **Stop Connection Editing** or press **Esc** to leave the mode.
 
-Connection Editing handles directed signal links and mechanical joint links separately, preserving their `controller.controllers` and `controller.joints` records.
+Connection Editing handles directed interactive and Controller-to-Piston links through `controller.controllers`; mechanical joint links use `controller.joints`.
 
 ## Controller joint sequences
 
 <img width="1919" height="1032" alt="image" src="https://github.com/user-attachments/assets/bf1b2662-d52a-4c93-b5e9-a9763cfae5af" />
 
-Select a physical **Controller** part to edit its **Seconds per frame** value in the Inspector. Lower positive values make its sequence run faster. Use **Controller settings → Edit Controller joints...** to edit bearing rotations and Piston extension lengths.
+Select a physical **Controller** part to edit its **Seconds per frame** value in the Inspector. Zero is allowed; positive values add delay between frames. Use **Controller settings → Edit Controller joints...** to edit bearing rotations and Piston sequence settings.
 
 - **Frame 0 · Start** is the joint’s starting position.
-- **Frames 1–10** set bearing rotation in degrees or Piston extension from 0 to 16.
-- **Reverse direction** reverses that joint’s sequence.
+- **Frames 1–10** set bearing rotation in degrees or a Piston setting from 0 to 15.
+- **Reverse direction** reverses bearing sequences.
 
-These settings apply to bearings and Pistons connected to the physical Controller. Engines are not Controllers and do not use this sequence editor.
+These settings apply to bearings and Pistons connected to the physical Controller. Scrap Mechanic stores bearing sequences under `controller.joints` and Piston sequences under `controller.controllers`, with `setting` values for each frame. Engines are not Controllers and do not use this sequence editor.
 
 ## Copy, paste, undo, and save
 

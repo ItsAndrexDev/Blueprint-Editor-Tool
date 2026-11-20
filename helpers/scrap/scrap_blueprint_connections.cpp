@@ -13,25 +13,24 @@ constexpr const char* pistonShapeId = "260b4597-f1ac-409c-8e6b-90c998c5fe94";
 bool isPistonShape(const std::string& shapeId) {
     if (shapeId.size() != std::char_traits<char>::length(pistonShapeId))
         return false;
-    return std::equal(shapeId.begin(),
-                       shapeId.end(),
-                       pistonShapeId,
-                       [](unsigned char left, unsigned char right) {
-                           return std::tolower(left) == std::tolower(right);
-                       });
+    return std::equal(
+        shapeId.begin(), shapeId.end(), pistonShapeId, [](unsigned char left, unsigned char right) {
+            return std::tolower(left) == std::tolower(right);
+        });
 }
-}
+} // namespace
 
 bool Parser::addDirectedConnection(json& blueprint,
                                    const std::vector<Block>& blocks,
                                    int sourceIndex,
-                                   int targetIndex) {
+                                   int targetIndex,
+                                   bool controllerPistonSequence) {
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= (int)blocks.size() ||
         targetIndex >= (int)blocks.size())
         return false;
     if (isPistonShape(blocks[sourceIndex].shapeID))
         return false;
-    auto controllerFor = [&](const Block& block) -> json* {
+    auto controllerFor = [&](const Block& block, bool create) -> json* {
         if (!blueprint.is_object())
             return nullptr;
         if (block.isJoint) {
@@ -53,13 +52,20 @@ bool Parser::addDirectedConnection(json& blueprint,
             block.childIndex >= (int)body["childs"].size())
             return nullptr;
         auto& child = body["childs"][block.childIndex];
-        if (!child.is_object() || !child.contains("controller") || !child["controller"].is_object())
+        if (!child.is_object())
             return nullptr;
+        if (!child.contains("controller") || !child["controller"].is_object()) {
+            if (!create)
+                return nullptr;
+            child["controller"] = json::object();
+        }
         return &child["controller"];
     };
-    json* source = controllerFor(blocks[sourceIndex]);
-    json* target = controllerFor(blocks[targetIndex]);
+    json* source = controllerFor(blocks[sourceIndex], true);
+    json* target = controllerFor(blocks[targetIndex], false);
     const auto& targetBlock = blocks[targetIndex];
+    if (controllerPistonSequence && (!targetBlock.isJoint || !isPistonShape(targetBlock.shapeID)))
+        return false;
     if (!target && targetBlock.isJoint && isPistonShape(targetBlock.shapeID) &&
         targetBlock.jointIndex >= 0 && blueprint.contains("joints") &&
         blueprint["joints"].is_array() &&
@@ -70,15 +76,7 @@ bool Parser::addDirectedConnection(json& blueprint,
             target = &joint["controller"];
         }
     }
-    if (!source || !target || !source->contains("id") || !(*source)["id"].is_number_integer())
-        return false;
-    std::int64_t sourceId;
-    try {
-        sourceId = (*source)["id"].get<std::int64_t>();
-    } catch (...) {
-        return false;
-    }
-    if (sourceId < 0)
+    if (!source || !target)
         return false;
     auto readId = [](const json& value, std::unordered_set<std::int64_t>& ids) {
         if (!value.is_number_integer())
@@ -107,37 +105,77 @@ bool Parser::addDirectedConnection(json& blueprint,
                     joint["controller"].contains("id"))
                     readId(joint["controller"]["id"], usedIds);
             }
-    readId((*source)["id"], usedIds);
-    std::int64_t targetId = -1;
-    if (target->contains("id") && (*target)["id"].is_number_integer())
-        try {
-            targetId = (*target)["id"].get<std::int64_t>();
-        } catch (...) {
-        }
-    if (targetId < 0) {
+    auto ensureId = [&](json& controller) {
+        if (controller.contains("id") && controller["id"].is_number_integer())
+            try {
+                const auto existingId = controller["id"].get<std::int64_t>();
+                if (existingId >= 0) {
+                    usedIds.insert(existingId);
+                    return existingId;
+                }
+            } catch (...) {
+            }
         std::int64_t candidate = 1;
         while (usedIds.contains(candidate) && candidate < std::numeric_limits<std::int64_t>::max())
             ++candidate;
         if (usedIds.contains(candidate))
-            return false;
-        targetId = candidate;
-        (*target)["id"] = targetId;
-    }
+            return std::int64_t{-1};
+        controller["id"] = candidate;
+        usedIds.insert(candidate);
+        return candidate;
+    };
+    const std::int64_t sourceId = ensureId(*source);
+    const std::int64_t targetId = ensureId(*target);
+    if (sourceId < 0 || targetId < 0)
+        return false;
     if (sourceIndex != targetIndex && sourceId == targetId)
         return false;
     if (!source->contains("controllers") || (*source)["controllers"].is_null())
         (*source)["controllers"] = json::array();
     if (!(*source)["controllers"].is_array())
         return false;
-    for (const auto& connection : (*source)["controllers"])
+    for (auto& connection : (*source)["controllers"])
         if (connection.is_object() && connection.contains("id") &&
             connection["id"].is_number_integer())
             try {
-                if (connection["id"].get<std::int64_t>() == targetId)
+                if (connection["id"].get<std::int64_t>() != targetId)
+                    continue;
+                if (!controllerPistonSequence)
                     return false;
+                if (!connection.contains("frames") || !connection["frames"].is_array()) {
+                    connection["frames"] = json::array();
+                    for (int frame = 0; frame < 11; ++frame)
+                        connection["frames"].push_back({{"setting", 0}});
+                }
+                if (!connection.contains("index") || !connection["index"].is_number_integer()) {
+                    std::int64_t order = 0;
+                    for (const auto& other : (*source)["controllers"])
+                        if (other.is_object() && other.contains("index") &&
+                            other["index"].is_number_integer())
+                            try {
+                                order = std::max(order, other["index"].get<std::int64_t>() + 1);
+                            } catch (...) {
+                            }
+                    connection["index"] = order;
+                }
+                return true;
             } catch (...) {
             }
-    (*source)["controllers"].push_back({{"id", targetId}});
+    json reference{{"id", targetId}};
+    if (controllerPistonSequence) {
+        std::int64_t order = 0;
+        for (const auto& other : (*source)["controllers"])
+            if (other.is_object() && other.contains("index") && other["index"].is_number_integer())
+                try {
+                    order = std::max(order, other["index"].get<std::int64_t>() + 1);
+                } catch (...) {
+                }
+        reference["index"] = order;
+        reference["frames"] = json::array();
+        for (int frame = 0; frame < 11; ++frame)
+            reference["frames"].push_back({{"setting", 0}});
+    }
+    (*source)["controllers"].push_back(std::move(reference));
     return true;
 }
 
@@ -148,9 +186,9 @@ bool Parser::addJointConnection(json& blueprint,
                                 bool controllerSequence) {
     if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= (int)blocks.size() ||
         targetIndex >= (int)blocks.size() || blocks[sourceIndex].isJoint ||
-        !blocks[targetIndex].isJoint || !blueprint.is_object() ||
-        !blueprint.contains("bodies") || !blueprint["bodies"].is_array() ||
-        !blueprint.contains("joints") || !blueprint["joints"].is_array())
+        !blocks[targetIndex].isJoint || !blueprint.is_object() || !blueprint.contains("bodies") ||
+        !blueprint["bodies"].is_array() || !blueprint.contains("joints") ||
+        !blueprint["joints"].is_array())
         return false;
 
     const auto& sourceBlock = blocks[sourceIndex];
@@ -165,9 +203,8 @@ bool Parser::addJointConnection(json& blueprint,
         sourceBlock.childIndex >= (int)body["childs"].size())
         return false;
     auto& child = body["childs"][sourceBlock.childIndex];
-    if (!child.is_object() || !child.contains("controller") ||
-        !child["controller"].is_object() || !child["controller"].contains("id") ||
-        !child["controller"]["id"].is_number_integer())
+    if (!child.is_object() || !child.contains("controller") || !child["controller"].is_object() ||
+        !child["controller"].contains("id") || !child["controller"]["id"].is_number_integer())
         return false;
 
     auto& joint = blueprint["joints"][targetBlock.jointIndex];
@@ -216,8 +253,8 @@ bool Parser::addJointConnection(json& blueprint,
     if (controllerSequence) {
         connection["frames"] = json::array();
         for (int frame = 0; frame < 11; ++frame)
-            connection["frames"].push_back(
-                piston ? json{{"targetLength", 0}} : json{{"targetAngle", 0}});
+            connection["frames"].push_back(piston ? json{{"targetLength", 0}}
+                                                  : json{{"targetAngle", 0}});
     }
     connections.push_back(std::move(connection));
     return true;

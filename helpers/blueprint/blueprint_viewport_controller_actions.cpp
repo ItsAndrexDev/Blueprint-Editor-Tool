@@ -74,11 +74,11 @@ bool EditingActions::isPistonPart(int index) const {
 }
 
 bool EditingActions::canUseAsLogicSource(int index) {
-    if (isPistonPart(index) || controllerIdForPart(index) < 0)
+    if (index < 0 || index >= (int)blocks_.size() || isPistonPart(index))
         return false;
     const auto shape = state.shapeConnectionCapabilities.find(lower(blocks_[index].shapeID));
     if (shape == state.shapeConnectionCapabilities.end())
-        return true; // Preserve support for modded interactives absent from the game catalog.
+        return controllerIdForPart(index) >= 0;
     if (shape->second & ShapeLogicOutput)
         return true;
     json* controller = controllerForPart(index);
@@ -137,7 +137,23 @@ ConnectionKind EditingActions::connectionKind(int sourceIndex, int targetIndex) 
                             return ConnectionKind::Logic;
                     } catch (...) {
                     }
+        if (source && source->contains("joints") && (*source)["joints"].is_array())
+            for (const auto& connection : (*source)["joints"])
+                if (connection.is_object() && connection.contains("id") &&
+                    connection["id"].is_number_integer())
+                    try {
+                        if (connection["id"].get<std::int64_t>() ==
+                            blocks_[targetIndex].jointId)
+                            return ConnectionKind::Joint;
+                    } catch (...) {
+                    }
+        // Scrap Mechanic stores a Controller-to-Piston sequence under
+        // controller.controllers, with `setting` frames, not as a joint-angle link.
+        return ConnectionKind::Logic;
     }
+    if (isPistonPart(targetIndex) && !isPistonPart(sourceIndex) &&
+        canUseAsConnectionSource(sourceIndex))
+        return ConnectionKind::Logic;
     if (canUseAsJointSource(sourceIndex) && blocks_[targetIndex].isJoint &&
         blocks_[targetIndex].jointId >= 0 &&
         ((controller && (targetBearing || targetPiston)) || (engine && targetBearing) ||
@@ -168,7 +184,13 @@ ConnectionKind EditingActions::connectionKind(int sourceIndex, int targetIndex) 
 bool EditingActions::addConnection(int sourceIndex, int targetIndex) {
     switch (connectionKind(sourceIndex, targetIndex)) {
     case ConnectionKind::Logic: {
-        return Parser::addDirectedConnection(blueprint_, blocks_, sourceIndex, targetIndex);
+        const auto shape =
+            state.shapeConnectionCapabilities.find(lower(blocks_[sourceIndex].shapeID));
+        const bool controllerPistonSequence =
+            shape != state.shapeConnectionCapabilities.end() &&
+            (shape->second & ShapeControllerJointOutput) != 0 && isPistonPart(targetIndex);
+        return Parser::addDirectedConnection(
+            blueprint_, blocks_, sourceIndex, targetIndex, controllerPistonSequence);
     }
     case ConnectionKind::Joint: {
         const auto shape =
@@ -202,7 +224,7 @@ float EditingActions::controllerTimePerFrame(int index) {
         return 1.f;
     try {
         const double value = (*controller)["timePerFrame"].get<double>();
-        return std::isfinite(value) && value > 0.0 && value <= std::numeric_limits<float>::max()
+        return std::isfinite(value) && value >= 0.0 && value <= std::numeric_limits<float>::max()
                    ? static_cast<float>(value)
                    : 1.f;
     } catch (...) {
@@ -211,7 +233,7 @@ float EditingActions::controllerTimePerFrame(int index) {
 }
 
 bool EditingActions::setControllerTimePerFrame(int index, float seconds) {
-    if (index < 0 || index >= (int)blocks_.size() || !std::isfinite(seconds) || seconds <= 0.f ||
+    if (index < 0 || index >= (int)blocks_.size() || !std::isfinite(seconds) || seconds < 0.f ||
         !isPhysicalController(blocks_[index], partDisplayName(index)))
         return false;
     json* controller = controllerForPart(index);
@@ -281,52 +303,78 @@ EditingActions::controllerJointSettings(int index) {
         !isPhysicalController(blocks_[index], partDisplayName(index)))
         return result;
     json* controller = controllerForPart(index);
-    if (!controller || !controller->contains("joints") || !(*controller)["joints"].is_array() ||
-        !blueprint_.is_object() || !blueprint_.contains("joints") ||
+    if (!controller || !blueprint_.is_object() || !blueprint_.contains("joints") ||
         !blueprint_["joints"].is_array())
         return result;
 
-    for (const auto& reference : (*controller)["joints"]) {
+    auto appendSettings = [&](const json& reference, bool controllerPistonSequence) {
         if (!reference.is_object() || !reference.contains("id") ||
             !reference["id"].is_number_integer() || !reference.contains("frames") ||
             !reference["frames"].is_array())
-            continue;
-        std::int64_t jointId = -1;
+            return;
+        std::int64_t referenceId = -1;
         try {
-            jointId = reference["id"].get<std::int64_t>();
+            referenceId = reference["id"].get<std::int64_t>();
         } catch (...) {
-            continue;
+            return;
         }
         const json* joint = nullptr;
-        for (const auto& candidate : blueprint_["joints"])
-            if (candidate.is_object() && candidate.contains("id") &&
-                candidate["id"].is_number_integer()) {
-                try {
-                    if (candidate["id"].get<std::int64_t>() == jointId) {
-                        joint = &candidate;
-                        break;
-                    }
-                } catch (...) {
-                }
+        for (const auto& candidate : blueprint_["joints"]) {
+            if (!candidate.is_object())
+                continue;
+            const json* identity = nullptr;
+            if (controllerPistonSequence) {
+                if (candidate.contains("controller") && candidate["controller"].is_object() &&
+                    candidate["controller"].contains("id"))
+                    identity = &candidate["controller"]["id"];
+            } else if (candidate.contains("id")) {
+                identity = &candidate["id"];
             }
-        if (!joint || !joint->contains("shapeId") || !(*joint)["shapeId"].is_string())
-            continue;
+            if (!identity || !identity->is_number_integer())
+                continue;
+            try {
+                if (identity->get<std::int64_t>() == referenceId) {
+                    joint = &candidate;
+                    break;
+                }
+            } catch (...) {
+            }
+        }
+        if (!joint || !joint->contains("id") || !(*joint)["id"].is_number_integer() ||
+            !joint->contains("shapeId") || !(*joint)["shapeId"].is_string())
+            return;
         const std::string shapeId = (*joint)["shapeId"].get<std::string>();
         const auto shape = state.shapeConnectionCapabilities.find(lower(shapeId));
-        if (shape == state.shapeConnectionCapabilities.end() ||
-            (shape->second & (ShapeBearingJoint | ShapePistonJoint)) == 0)
-            continue;
+        if (shape == state.shapeConnectionCapabilities.end())
+            return;
+        const bool piston = (shape->second & ShapePistonJoint) != 0;
+        if (controllerPistonSequence ? !piston
+                                     : (shape->second & (ShapeBearingJoint | ShapePistonJoint)) == 0)
+            return;
+        std::int64_t actualJointId = -1;
+        try {
+            actualJointId = (*joint)["id"].get<std::int64_t>();
+        } catch (...) {
+            return;
+        }
+        if (std::any_of(result.begin(), result.end(), [&](const auto& item) {
+                return item.jointId == actualJointId;
+            }))
+            return;
+
         std::string partName = Parser::findBlockNameByShapeID(shapeId, items_);
         if (partName.empty() || partName == "Unknown part") {
             const auto catalogEntry = state.catalog.find(lower(shapeId));
             if (catalogEntry != state.catalog.end())
                 partName = displayNameFromShapeSet(catalogEntry->second.name);
         }
-
         ControllerJointSettings settings;
-        settings.jointId = jointId;
+        settings.jointId = actualJointId;
+        settings.referenceId = referenceId;
         settings.connectionIndex = (int)result.size();
-        settings.piston = (shape->second & ShapePistonJoint) != 0;
+        settings.piston = piston;
+        settings.controllerSequence = controllerPistonSequence;
+        settings.frameValueMaximum = controllerPistonSequence ? 15 : 16;
         if (reference.contains("index") && reference["index"].is_number_integer())
             try {
                 settings.connectionIndex = reference["index"].get<int>();
@@ -336,7 +384,9 @@ EditingActions::controllerJointSettings(int index) {
         settings.reverse = reference.contains("reverse") && reference["reverse"].is_boolean()
                                ? reference["reverse"].get<bool>()
                                : false;
-        const char* frameKey = settings.piston ? "targetLength" : "targetAngle";
+        const char* frameKey = controllerPistonSequence
+                                   ? "setting"
+                                   : (piston ? "targetLength" : "targetAngle");
         settings.frameValues.reserve(reference["frames"].size());
         for (const auto& frame : reference["frames"]) {
             int value = 0;
@@ -351,7 +401,14 @@ EditingActions::controllerJointSettings(int index) {
             settings.frameValues.push_back(value);
         }
         result.push_back(std::move(settings));
-    }
+    };
+
+    if (controller->contains("joints") && (*controller)["joints"].is_array())
+        for (const auto& reference : (*controller)["joints"])
+            appendSettings(reference, false);
+    if (controller->contains("controllers") && (*controller)["controllers"].is_array())
+        for (const auto& reference : (*controller)["controllers"])
+            appendSettings(reference, true);
     std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
         return left.connectionIndex != right.connectionIndex
                    ? left.connectionIndex < right.connectionIndex
@@ -361,51 +418,67 @@ EditingActions::controllerJointSettings(int index) {
 }
 
 bool EditingActions::setControllerJointFrameValue(int index,
-                                                  std::int64_t jointId,
+                                                  std::int64_t referenceId,
                                                   int frameIndex,
                                                   int value) {
     if (index < 0 || index >= (int)blocks_.size() ||
         !isPhysicalController(blocks_[index], partDisplayName(index)) || frameIndex < 0)
         return false;
     json* controller = controllerForPart(index);
-    if (!controller || !controller->contains("joints") || !(*controller)["joints"].is_array())
+    if (!controller)
         return false;
     if (!blueprint_.is_object() || !blueprint_.contains("joints") ||
         !blueprint_["joints"].is_array())
         return false;
-    for (auto& reference : (*controller)["joints"]) {
+    auto updateReference = [&](json& reference, bool controllerPistonSequence) {
         if (!reference.is_object() || !reference.contains("id") ||
             !reference["id"].is_number_integer())
-            continue;
+            return false;
         try {
-            if (reference["id"].get<std::int64_t>() != jointId)
-                continue;
+            if (reference["id"].get<std::int64_t>() != referenceId)
+                return false;
         } catch (...) {
-            continue;
+            return false;
         }
         if (!reference.contains("frames") || !reference["frames"].is_array() ||
             frameIndex >= (int)reference["frames"].size())
             return false;
         bool piston = false;
-        for (const auto& joint : blueprint_["joints"])
-            if (joint.is_object() && joint.contains("id") &&
-                joint["id"].is_number_integer() && joint.contains("shapeId") &&
-                joint["shapeId"].is_string())
-                try {
-                    if (joint["id"].get<std::int64_t>() == jointId) {
-                        const auto shape = state.shapeConnectionCapabilities.find(
-                            lower(joint["shapeId"].get<std::string>()));
-                        piston = shape != state.shapeConnectionCapabilities.end() &&
-                                 (shape->second & ShapePistonJoint) != 0;
-                        break;
-                    }
-                } catch (...) {
+        for (const auto& joint : blueprint_["joints"]) {
+            if (!joint.is_object())
+                continue;
+            const json* identity = nullptr;
+            if (controllerPistonSequence) {
+                if (joint.contains("controller") && joint["controller"].is_object() &&
+                    joint["controller"].contains("id"))
+                    identity = &joint["controller"]["id"];
+            } else if (joint.contains("id")) {
+                identity = &joint["id"];
+            }
+            if (!identity || !identity->is_number_integer() || !joint.contains("shapeId") ||
+                !joint["shapeId"].is_string())
+                continue;
+            try {
+                if (identity->get<std::int64_t>() == referenceId) {
+                    const auto shape = state.shapeConnectionCapabilities.find(
+                        lower(joint["shapeId"].get<std::string>()));
+                    piston = shape != state.shapeConnectionCapabilities.end() &&
+                             (shape->second & ShapePistonJoint) != 0;
+                    break;
                 }
+            } catch (...) {
+            }
+        }
+        if (controllerPistonSequence && !piston)
+            return false;
         auto& frames = reference["frames"];
         if (!frames[frameIndex].is_object())
             frames[frameIndex] = json::object();
-        const char* frameKey = piston ? "targetLength" : "targetAngle";
-        frames[frameIndex][frameKey] = piston ? std::clamp(value, 0, 16) : value;
+        const char* frameKey = controllerPistonSequence
+                                   ? "setting"
+                                   : (piston ? "targetLength" : "targetAngle");
+        const int maxValue = controllerPistonSequence ? 15 : 16;
+        frames[frameIndex][frameKey] = piston ? std::clamp(value, 0, maxValue) : value;
         if (!frames[0].is_object())
             frames[0] = json::object();
         if (!piston) {
@@ -429,7 +502,15 @@ bool EditingActions::setControllerJointFrameValue(int index,
                 (long long)std::numeric_limits<int>::max());
         }
         return true;
-    }
+    };
+    if (controller->contains("joints") && (*controller)["joints"].is_array())
+        for (auto& reference : (*controller)["joints"])
+            if (updateReference(reference, false))
+                return true;
+    if (controller->contains("controllers") && (*controller)["controllers"].is_array())
+        for (auto& reference : (*controller)["controllers"])
+            if (updateReference(reference, true))
+                return true;
     return false;
 }
 

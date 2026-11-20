@@ -287,8 +287,8 @@ void render(json& blueprint,
     if (state.logicManipulation)
         ImGui::TextWrapped(
             "Click a signal source or engine, seat, or Controller, then click a compatible target. "
-            "Signal links can target Pistons; mechanical links connect engines, driver seats, and "
-            "Controllers to supported joints. Shift-click changes source; click a connection to "
+            "Signal sources and physical Controllers can connect to Pistons. Mechanical links "
+            "connect engines, driver seats, and Controllers to their supported joints. Shift-click changes source; click a connection to "
             "remove it. Right-click clears selection; Esc exits.");
     float avail = ImGui::GetContentRegionAvail().x;
     float inspector = std::clamp(avail * .25f, 230.f, 330.f);

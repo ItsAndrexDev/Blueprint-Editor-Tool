@@ -13,26 +13,82 @@ bool Parser::removeJointFromNode(json& blueprint, int jointIndex) {
         return false;
     const auto removed = blueprint["joints"][jointIndex];
     std::unordered_set<std::int64_t> ids;
+    std::unordered_set<std::int64_t> removedControllerIds;
     if (removed.is_object() && removed.contains("id") && removed["id"].is_number_integer())
         ids.insert(removed["id"].get<std::int64_t>());
-    if (!ids.empty() && blueprint.contains("bodies") && blueprint["bodies"].is_array())
+    if (removed.is_object() && removed.contains("controller") &&
+        removed["controller"].is_object() && removed["controller"].contains("id") &&
+        removed["controller"]["id"].is_number_integer())
+        try {
+            removedControllerIds.insert(removed["controller"]["id"].get<std::int64_t>());
+        } catch (...) {
+        }
+    if ((!ids.empty() || !removedControllerIds.empty()) && blueprint.contains("bodies") &&
+        blueprint["bodies"].is_array())
         for (auto& body : blueprint["bodies"]) {
             if (!body.is_object() || !body.contains("childs") || !body["childs"].is_array())
                 continue;
             for (auto& child : body["childs"]) {
-                if (!child.is_object() || !child.contains("joints") || !child["joints"].is_array())
+                if (!child.is_object())
                     continue;
-                auto& refs = child["joints"];
-                refs.erase(std::remove_if(refs.begin(),
-                                          refs.end(),
-                                          [&](const json& ref) {
-                                              return ref.is_object() && ref.contains("id") &&
-                                                     ref["id"].is_number_integer() &&
-                                                     ids.contains(ref["id"].get<std::int64_t>());
-                                          }),
-                           refs.end());
-                if (refs.empty())
-                    child.erase("joints");
+                if (child.contains("joints") && child["joints"].is_array()) {
+                    auto& refs = child["joints"];
+                    refs.erase(std::remove_if(refs.begin(),
+                                              refs.end(),
+                                              [&](const json& ref) {
+                                                  if (!ref.is_object() || !ref.contains("id") ||
+                                                      !ref["id"].is_number_integer())
+                                                      return false;
+                                                  try {
+                                                      return ids.contains(
+                                                          ref["id"].get<std::int64_t>());
+                                                  } catch (...) {
+                                                      return false;
+                                                  }
+                                              }),
+                               refs.end());
+                    if (refs.empty())
+                        child.erase("joints");
+                }
+                if (!child.contains("controller") || !child["controller"].is_object())
+                    continue;
+                auto& controller = child["controller"];
+                if (!ids.empty() && controller.contains("joints") &&
+                    controller["joints"].is_array()) {
+                    auto& refs = controller["joints"];
+                    refs.erase(std::remove_if(refs.begin(),
+                                              refs.end(),
+                                              [&](const json& ref) {
+                                                  if (!ref.is_object() || !ref.contains("id") ||
+                                                      !ref["id"].is_number_integer())
+                                                      return false;
+                                                  try {
+                                                      return ids.contains(
+                                                          ref["id"].get<std::int64_t>());
+                                                  } catch (...) {
+                                                      return false;
+                                                  }
+                                              }),
+                               refs.end());
+                }
+                if (!removedControllerIds.empty() && controller.contains("controllers") &&
+                    controller["controllers"].is_array()) {
+                    auto& refs = controller["controllers"];
+                    refs.erase(std::remove_if(refs.begin(),
+                                              refs.end(),
+                                              [&](const json& ref) {
+                                                  if (!ref.is_object() || !ref.contains("id") ||
+                                                      !ref["id"].is_number_integer())
+                                                      return false;
+                                                  try {
+                                                      return removedControllerIds.contains(
+                                                          ref["id"].get<std::int64_t>());
+                                                  } catch (...) {
+                                                      return false;
+                                                  }
+                                              }),
+                               refs.end());
+                }
             }
         }
     blueprint["joints"].erase(blueprint["joints"].begin() + jointIndex);
